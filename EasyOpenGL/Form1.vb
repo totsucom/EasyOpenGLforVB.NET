@@ -159,7 +159,7 @@ Public Class Form1
         End With
 
         'サイコロを描く
-        texture = New Bitmap("dice.jpg")
+        texture = New Bitmap("..\..\dice.jpg")
         v3d.SetTexture(texture)
         boDice = v3d.Create3DObject(bNormal:=True, bTexture:=True, bColor:=False)
         With boDice
