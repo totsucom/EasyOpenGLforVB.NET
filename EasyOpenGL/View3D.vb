@@ -5,17 +5,20 @@ Imports OpenTK.Graphics.OpenGL
 Public Class View3D
     Inherits OpenTK.GLControl
 
-    Public Event LoadModel(sender As View3D)
-    Public Event Tick(sender As View3D, milliSeconds As Long)
+    'イベント
+    Public Event LoadModel(sender As View3D)                    '３D初期化後にユーザー側の初期化処理のために呼ばれる
+    Public Event ViewportResized(sender As View3D)              'ウィンドウがリサイズされ、ビューポートが再設定されたときに呼ばれる（LoadModelのタイミングでは呼ばない）
+    Public Event Tick(sender As View3D, milliSeconds As Long)   'フレーム描画毎に呼ばれる
 
+    '3D関連
     Private projection As Matrix4                       '視野
-    Private eyeMatrix As Matrix4 = Matrix4.Identity     '視点を決める回転行列
+    Private cameraMatrix As Matrix4 = Matrix4.Identity  '視点を決める回転行列
 
     Private mousePos As New Point                       'マウスでカメラを動かすため、座標を記憶
-    Private modelHorizAngle As Single = 0               '視線(カメラの向き)
-    Private modelVertAngle As Single = 0
-    Private eyePosition As New Vector3(0, 0, 0)         '視点(カメラの位置)
-    Private eyeDistance As Single = 100                 '視点から注目点までの距離
+    Private cameraHorizAngle As Single = 0              '視線(カメラの向き)
+    Private cameraVertAngle As Single = 0
+    Private cameraPosition As New Vector3(0, 0, 0)      '視点(カメラの位置)
+    Private cameraDistance As Single = 100              '視点から注目点までの距離
 
     Private viewingAngleV As Single = MathHelper.PiOver4 '縦方向の視野角
     Private zNear = 1.0F                                '表示する奥行きの範囲。手前
@@ -39,26 +42,37 @@ Public Class View3D
     Private _lightNames As Integer() = {LightName.Light0, LightName.Light1, LightName.Light2, LightName.Light3}
     Private _lightCaps As Integer() = {EnableCap.Light0, EnableCap.Light1, EnableCap.Light2, EnableCap.Light3}
 
-    Private _loaded As Boolean = False
 
-    Private _fps As Single
-    Private _limitFrames As Single = 0
-    Private _waitTimerForFrame As Integer '[ms]
+    'いろいろ
+    Private _loaded As Boolean = False      '初期化後True
+    Private _fps As Single                  'フレームレートを保持
+    Private _limitFrames As Single = 0      'フレームレート制限値
+    Private _waitTimerForFrame As Integer   'フレームレート制限のための待ち時間[ms]
 
+    ''' <summary>
+    ''' 初期化されたことを返す
+    ''' </summary>
+    ''' <returns></returns>
     Public ReadOnly Property Loaded As Boolean
         Get
             Return _loaded
         End Get
     End Property
 
-    '現在のフレームレートを取得する
+    ''' <summary>
+    ''' 現在のフレームレートを取得する
+    ''' </summary>
+    ''' <returns></returns>
     Public ReadOnly Property FPS As Single
         Get
             Return _fps
         End Get
     End Property
 
-    '最大フレームレートを設定または取得する
+    ''' <summary>
+    ''' 最大フレームレートを設定または取得する
+    ''' </summary>
+    ''' <returns></returns>
     Public Property LimitFPS As Single
         Get
             Return _limitFrames
@@ -70,7 +84,10 @@ Public Class View3D
         End Set
     End Property
 
-    '背景色を設定
+    ''' <summary>
+    ''' ３D描画エリアのクリア色、つまり背景色を設定する
+    ''' </summary>
+    ''' <returns></returns>
     Public Property ClearColor As Color4
         Get
             Return _clearColor
@@ -81,7 +98,12 @@ Public Class View3D
         End Set
     End Property
 
-    '照明の設定
+    ''' <summary>
+    ''' 照明を設定する。indexは照明のインデックスで、０～３を設定。
+    ''' 設定を削除したい場合はNothingを渡す
+    ''' </summary>
+    ''' <param name="index"></param>
+    ''' <param name="value"></param>
     Public Sub SetLight(index As Integer, ByRef value As Light)
         _light(index) = value
         If _loaded AndAlso value IsNot Nothing Then
@@ -92,14 +114,28 @@ Public Class View3D
             GL.Light(_lightNames(index), LightParameter.Specular, value.Specular)
         End If
     End Sub
+
+    ''' <summary>
+    ''' 照明を取得する。取得した照明の個別パラメータを設定しても反映されないので、
+    ''' 設定を反映する場合は必ずSetLight()を呼び出すこと
+    ''' </summary>
+    ''' <param name="index"></param>
+    ''' <returns></returns>
     Public Function GetLight(index As Integer) As Light
         Return _light(index)
     End Function
 
-
-
-    'viewingAngleV  縦方向の視野角(デフォルト45度)。横方向はウィンドウのアスペクト比で決まる
-    'useMouse       マウスによるカメラの移動などを使用する
+    ''' <summary>
+    ''' 実際に使用するにはフォーム上にパネルなどを配置し、Panel1.Controls.Add(View3D変数) などで使用開始する。
+    ''' viewingAngleV: 視野の縦角度(ラジアン)を指定。デフォルトは45度。水平方向の視野角はView3Dのアスペクト比で決まる。
+    ''' viewDistanceNear: 表示可能な奥行きの範囲。手前側。デフォルトは 1.0F
+    ''' viewDistanceFar: 表示可能な奥行きの範囲。奥側。デフォルトは 10000.0F
+    ''' useMouse: マウスイベント処理を行い、カメラ移動処理を行うかどうか。デフォルトは行う。
+    ''' </summary>
+    ''' <param name="viewingAngleV"></param>
+    ''' <param name="viewDistanceNear"></param>
+    ''' <param name="viewDistanceFar"></param>
+    ''' <param name="useMouse"></param>
     Sub New(Optional viewingAngleV As Single = MathHelper.PiOver4,
             Optional viewDistanceNear As Single = 1.0F,
             Optional viewDistanceFar As Single = 10000.0F,
@@ -122,12 +158,25 @@ Public Class View3D
             AddHandler Me.MouseMove, AddressOf glControl_MouseMove
             AddHandler Me.MouseWheel, AddressOf glControl_MouseWheel
         End If
+        AddHandler Application.Idle, AddressOf Application_Idle
     End Sub
 
-    'Protected Overrides Sub Finalize()
-    '    MyBase.Finalize()
-    '    DisposeObject()
-    'End Sub
+    '3Dビューを継続して更新するために呼び出しています
+    Private Sub Application_Idle(sender As Object, e As EventArgs)
+        Me.Invalidate() 'このように頻繁に呼ばないとフレームレートを達成できない
+    End Sub
+
+    'ビューポートを準備する
+    Private Sub PrepareViewport()
+        'ビューポートを設定
+        GL.Viewport(0, 0, Me.Width, Me.Height)
+
+        '視野
+        projection = Matrix4.CreatePerspectiveFieldOfView(
+                    viewingAngleV, CSng(Me.Width) / CSng(Me.Height), zNear, zFar)
+        GL.MatrixMode(MatrixMode.Projection)
+        GL.LoadMatrix(projection)
+    End Sub
 
     Private Sub glControl_Load(ByVal sender As Object, ByVal e As EventArgs)
         '
@@ -137,43 +186,8 @@ Public Class View3D
         GL.ClearColor(Color4.DarkBlue)
         GL.Enable(EnableCap.DepthTest)
 
-        ''裏面削除、時計回りが表でカリング　個別に設定
-        'GL.Enable(EnableCap.CullFace)
-        'GL.CullFace(CullFaceMode.Back)
-        'GL.FrontFace(FrontFaceDirection.Cw)
-
-        'ライティングON Light0を有効化　個別に設定
-        'GL.Enable(EnableCap.Lighting)
-        'GL.Enable(EnableCap.Light0)
-
-        '法線の正規化　頂点追加時に正規化をするのでいらない
-        'GL.Enable(EnableCap.Normalize)
-
-        'ビューポートを設定
-        GL.Viewport(0, 0, Me.Width, Me.Height)
-
-        '照明
-        'lightPosition = New Vector4(200.0F, 150.0F, 500.0F, 0.0F)
-        'lightAmbient = Color4.White 'New Color4(0.2F, 0.2F, 0.2F, 1.0F)
-        'lightDiffuse = New Color4(0.7F, 0.7F, 0.7F, 1.0F)
-        'lightSpecular = New Color4(1.0F, 1.0F, 1.0F, 1.0F)
-
-        ''材質
-        'materialAmbient = New Color4(0.2F, 0.2F, 0.2F, 1.0F)
-        'materialDiffuse = New Color4(0.7F, 0.7F, 0.7F, 1.0F)
-        'materialSpecular = New Color4(0.6F, 0.6F, 0.6F, 1.0F)
-        'materialShininess = 51.4F
-
-        '
-        ' 以下、必要に応じてPaint側に持っていくこと。
-        ' 変化しない場合はここでいい
-        '
-
-        '視野
-        projection = Matrix4.CreatePerspectiveFieldOfView(
-                    viewingAngleV, CSng(Me.Width) / CSng(Me.Height), zNear, zFar)
-        GL.MatrixMode(MatrixMode.Projection)
-        GL.LoadMatrix(projection)
+        'ビューポートを準備する
+        PrepareViewport()
 
         'ライトの指定
         For i As Integer = 0 To UBound(_light)
@@ -187,19 +201,17 @@ Public Class View3D
             End If
         Next
 
-        ''材質の指定
-        'GL.Material(MaterialFace.Front, MaterialParameter.Ambient, materialAmbient)
-        'GL.Material(MaterialFace.Front, MaterialParameter.Diffuse, materialDiffuse)
-        'GL.Material(MaterialFace.Front, MaterialParameter.Specular, materialSpecular)
-        'GL.Material(MaterialFace.Front, MaterialParameter.Shininess, materialShininess)
-
         'モデルを生成や初期処理を行うためにユーザー側のハンドラを呼び出す
         _loaded = True
         RaiseEvent LoadModel(Me)
     End Sub
 
     Private Sub glControl_Resize(ByVal sender As Object, ByVal e As EventArgs)
-        GL.Viewport(0, 0, Me.Width, Me.Height)
+        If _loaded Then
+            'ビューポートを再設定する
+            PrepareViewport()
+            RaiseEvent ViewportResized(Me)
+        End If
     End Sub
 
     Private Sub glControl_Paint(ByVal sender As Object, ByVal e As PaintEventArgs)
@@ -212,11 +224,8 @@ Public Class View3D
                 swWait.Start()
             Else
                 elapsedMilliseconds = swWait.ElapsedMilliseconds
-                If elapsedMilliseconds < _waitTimerForFrame Then
-                    Exit Sub
-                Else
-                    swWait.Restart()
-                End If
+                If elapsedMilliseconds < _waitTimerForFrame Then Exit Sub
+                swWait.Restart()
             End If
         End If
 
@@ -241,7 +250,7 @@ Public Class View3D
         GL.Clear(ClearBufferMask.ColorBufferBit Or ClearBufferMask.DepthBufferBit)
 
         '視野の設定
-        Dim modelview As Matrix4 = Matrix4.LookAt(New Vector3(0, 0, eyeDistance), New Vector3(0, 0, 0), New Vector3(0, 1, 0))
+        Dim modelview As Matrix4 = Matrix4.LookAt(New Vector3(0, 0, cameraDistance), New Vector3(0, 0, 0), New Vector3(0, 1, 0))
         GL.MatrixMode(MatrixMode.Modelview)
         GL.LoadMatrix(modelview)
 
@@ -274,7 +283,7 @@ Public Class View3D
         Next
 
         GL.PushMatrix()
-        GL.MultMatrix(eyeMatrix) 'この行との前後関係が肝
+        GL.MultMatrix(cameraMatrix) 'この行との前後関係が肝
 
         'カメラ位置の影響を受けない、グローバル位置の光源を設定
         For i As Integer = 0 To UBound(_light)
@@ -293,123 +302,125 @@ Public Class View3D
         GL.GetMaterial(MaterialFace.Front, MaterialParameter.Shininess, shi)
 
         '描画
-        For i As Integer = 0 To arBO.Count - 1
-            With arBO(i)
-                If .Active AndAlso .Martices.Count > 0 Then
+        For j As Integer = 0 To 1 '非Blendモデル、次にBlendモデル
+            For i As Integer = 0 To arBO.Count - 1
+                With arBO(i)
+                    If .Active AndAlso .Martices.Count > 0 AndAlso ((j = 0 AndAlso Not .Blend) OrElse (j = 1 AndAlso .Blend)) Then
 
-                    'カリング設定
-                    If .Culling Then
-                        GL.Enable(EnableCap.CullFace) '裏面は非表示
-                    Else
-                        GL.Disable(EnableCap.CullFace)
-                    End If
-
-                    'ライティング設定
-                    If .Lighting Then
-                        GL.Enable(EnableCap.Lighting)
-                    Else
-                        GL.Disable(EnableCap.Lighting)
-                    End If
-
-                    'マテリアルを設定
-                    If .Material IsNot Nothing Then
-                        With .Material
-                            GL.Material(MaterialFace.Front, MaterialParameter.Ambient, .Ambient)
-                            GL.Material(MaterialFace.Front, MaterialParameter.Diffuse, .Diffuse)
-                            GL.Material(MaterialFace.Front, MaterialParameter.Specular, .Specular)
-                            GL.Material(MaterialFace.Front, MaterialParameter.Shininess, .Shininess)
-                        End With
-                    End If
-
-                    'ブレンディング(半透明)を設定
-                    If .Blend Then
-                        GL.Enable(EnableCap.Blend)
-                    Else
-                        GL.Disable(EnableCap.Blend)
-                    End If
-
-                    'ポイントサイズを設定
-                    If ._bm = BeginMode.Points Then GL.PointSize(.PointSize)
-
-                    '頂点バッファを関連付け
-                    GL.BindVertexArray(._vao)
-                    GL.BindBuffer(BufferTarget.ElementArrayBuffer, ._ibo)
-
-                    'テクスチャを関連付け
-                    Dim setTexture As Boolean = False
-                    If ._bTexture Then
-                        For Each ti As TextureInfo In arTxt
-                            If ti.bmp Is .Texture Then
-                                GL.BindTexture(TextureTarget.Texture2D, ti.txt)
-                                setTexture = True
-                                Exit For
-                            End If
-                        Next
-                    End If
-
-                    'ポイントスプライトを設定
-                    If ._bPointSprite Then
-                        GL.Enable(EnableCap.PointSprite)
-
-                        'ポイントにテクスチャ全体を割り当てる
-                        If setTexture Then GL.TexEnv(TextureEnvTarget.PointSprite, TextureEnvParameter.CoordReplace, 1.0F) '1.0F=true
-
-                        '遠近感を設定
-                        If .PointPerspective Then
-                            Static distance As Single() = {}
-                            If distance.Count = 0 Then distance = {0, 0, Math.Pow(1 / (projection.M11 * Width / 2), 2)}
-                            GL.PointParameter(PointParameterName.PointDistanceAttenuation, distance)
+                        'カリング設定
+                        If .Culling Then
+                            GL.Enable(EnableCap.CullFace) '裏面は非表示
                         Else
-                            GL.PointParameter(PointParameterName.PointDistanceAttenuation, New Single() {1, 0, 0})
+                            GL.Disable(EnableCap.CullFace)
+                        End If
+
+                        'ライティング設定
+                        If .Lighting Then
+                            GL.Enable(EnableCap.Lighting)
+                        Else
+                            GL.Disable(EnableCap.Lighting)
+                        End If
+
+                        'マテリアルを設定
+                        If .Material IsNot Nothing Then
+                            With .Material
+                                GL.Material(MaterialFace.Front, MaterialParameter.Ambient, .Ambient)
+                                GL.Material(MaterialFace.Front, MaterialParameter.Diffuse, .Diffuse)
+                                GL.Material(MaterialFace.Front, MaterialParameter.Specular, .Specular)
+                                GL.Material(MaterialFace.Front, MaterialParameter.Shininess, .Shininess)
+                            End With
+                        End If
+
+                        'ブレンディング(半透明)を設定
+                        If .Blend Then
+                            GL.Enable(EnableCap.Blend)
+                        Else
+                            GL.Disable(EnableCap.Blend)
+                        End If
+
+                        'ポイントサイズを設定
+                        If ._bm = BeginMode.Points Then GL.PointSize(.PointSize)
+
+                        '頂点バッファを関連付け
+                        GL.BindVertexArray(._vao)
+                        GL.BindBuffer(BufferTarget.ElementArrayBuffer, ._ibo)
+
+                        'テクスチャを関連付け
+                        Dim setTexture As Boolean = False
+                        If ._bTexture Then
+                            For Each ti As TextureInfo In arTxt
+                                If ti.bmp Is .Texture Then
+                                    GL.BindTexture(TextureTarget.Texture2D, ti.txt)
+                                    setTexture = True
+                                    Exit For
+                                End If
+                            Next
+                        End If
+
+                        'ポイントスプライトを設定
+                        If ._bPointSprite Then
+                            GL.Enable(EnableCap.PointSprite)
+
+                            'ポイントにテクスチャ全体を割り当てる
+                            If setTexture Then GL.TexEnv(TextureEnvTarget.PointSprite, TextureEnvParameter.CoordReplace, 1.0F) '1.0F=true
+
+                            '遠近感を設定
+                            If .PointPerspective Then
+                                Static distance As Single() = {}
+                                If distance.Count = 0 Then distance = {0, 0, Math.Pow(1 / (projection.M11 * Width / 2), 2)}
+                                GL.PointParameter(PointParameterName.PointDistanceAttenuation, distance)
+                            Else
+                                GL.PointParameter(PointParameterName.PointDistanceAttenuation, New Single() {1, 0, 0})
+                            End If
+                        End If
+
+
+                        '各Arrayを有効化
+                        GL.EnableClientState(ArrayCap.VertexArray)
+                        If ._bNormal Then GL.EnableClientState(ArrayCap.NormalArray)
+                        If setTexture Then GL.EnableClientState(ArrayCap.TextureCoordArray)
+                        If ._bColor Then GL.EnableClientState(ArrayCap.ColorArray)
+
+
+                        GL.PushMatrix()
+                        If ._bXYZ Then GL.MultMatrix(cameraMatrix) '3Dモデルならカメラ位置を適用
+
+                        'モデルを複数描画
+                        For Each m As Matrix4 In .Martices
+                            GL.PushMatrix()
+                            GL.MultMatrix(m)                    'モデル位置を適用
+                            GL.DrawElements(._bm, ._numIndex, DrawElementsType.UnsignedInt, 0) '描画
+                            GL.PopMatrix()
+                        Next
+
+                        GL.PopMatrix()
+
+
+                        '各Arrayを無効化
+                        GL.DisableClientState(ArrayCap.VertexArray)
+                        If ._bNormal Then GL.DisableClientState(ArrayCap.NormalArray)
+                        If setTexture Then GL.DisableClientState(ArrayCap.TextureCoordArray)
+                        If ._bColor Then GL.DisableClientState(ArrayCap.ColorArray)
+
+                        'バッファの関連付けを解除
+                        GL.BindVertexArray(0)
+                        GL.BindBuffer(BufferTarget.ElementArrayBuffer, 0)
+                        If setTexture Then GL.BindTexture(TextureTarget.Texture2D, 0)
+
+                        'その他、悪さしそうな機能はOFF
+                        If ._bPointSprite Then GL.Disable(EnableCap.PointSprite)
+                        If .Blend Then GL.Disable(EnableCap.Blend)
+
+                        'マテリアルを戻す
+                        If .Material IsNot Nothing Then
+                            GL.Material(MaterialFace.Front, MaterialParameter.Ambient, amb)
+                            GL.Material(MaterialFace.Front, MaterialParameter.Diffuse, dif)
+                            GL.Material(MaterialFace.Front, MaterialParameter.Specular, spe)
+                            GL.Material(MaterialFace.Front, MaterialParameter.Shininess, shi)
                         End If
                     End If
-
-
-                    '各Arrayを有効化
-                    GL.EnableClientState(ArrayCap.VertexArray)
-                    If ._bNormal Then GL.EnableClientState(ArrayCap.NormalArray)
-                    If setTexture Then GL.EnableClientState(ArrayCap.TextureCoordArray)
-                    If ._bColor Then GL.EnableClientState(ArrayCap.ColorArray)
-
-
-                    GL.PushMatrix()
-                    If ._bXYZ Then GL.MultMatrix(eyeMatrix) '3Dモデルならカメラ位置を適用
-
-                    'モデルを複数描画
-                    For Each m As Matrix4 In .Martices
-                        GL.PushMatrix()
-                        GL.MultMatrix(m)                    'モデル位置を適用
-                        GL.DrawElements(._bm, ._numIndex, DrawElementsType.UnsignedInt, 0) '描画
-                        GL.PopMatrix()
-                    Next
-
-                    GL.PopMatrix()
-
-
-                    '各Arrayを無効化
-                    GL.DisableClientState(ArrayCap.VertexArray)
-                    If ._bNormal Then GL.DisableClientState(ArrayCap.NormalArray)
-                    If setTexture Then GL.DisableClientState(ArrayCap.TextureCoordArray)
-                    If ._bColor Then GL.DisableClientState(ArrayCap.ColorArray)
-
-                    'バッファの関連付けを解除
-                    GL.BindVertexArray(0)
-                    GL.BindBuffer(BufferTarget.ElementArrayBuffer, 0)
-                    If setTexture Then GL.BindTexture(TextureTarget.Texture2D, 0)
-
-                    'その他、悪さしそうな機能はOFF
-                    If ._bPointSprite Then GL.Disable(EnableCap.PointSprite)
-                    If .Blend Then GL.Disable(EnableCap.Blend)
-
-                    'マテリアルを戻す
-                    If .Material IsNot Nothing Then
-                        GL.Material(MaterialFace.Front, MaterialParameter.Ambient, amb)
-                        GL.Material(MaterialFace.Front, MaterialParameter.Diffuse, dif)
-                        GL.Material(MaterialFace.Front, MaterialParameter.Specular, spe)
-                        GL.Material(MaterialFace.Front, MaterialParameter.Shininess, shi)
-                    End If
-                End If
-            End With
+                End With
+            Next
         Next
 
         Me.SwapBuffers()
@@ -417,38 +428,88 @@ Public Class View3D
         RaiseEvent Tick(Me, elapsedMilliseconds)
     End Sub
 
+    ''' <summary>
+    ''' カメラの位置（視点）を変更する
+    ''' position: カメラの移動方向（上下左右ではなく、絶対軸方向）
+    ''' </summary>
+    ''' <param name="position"></param>
+    Public Sub MoveCameraXYZ(position As Vector3)
+        cameraPosition += position '現在位置に加算
+
+        '行列を再計算
+        cameraMatrix = Matrix4.CreateTranslation(cameraPosition)
+        cameraMatrix = cameraMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitY, cameraHorizAngle)
+        cameraMatrix = cameraMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitX, cameraVertAngle)
+    End Sub
+
+    ''' <summary>
+    ''' カメラの向き（視線）を変更する
+    ''' horizAngle: 水平方向の角度
+    ''' vertAngle: 上下方向の角度
+    ''' </summary>
+    ''' <param name="horizAngle"></param>
+    ''' <param name="vertAngle"></param>
+    Public Sub TurnCamera(horizAngle As Single, vertAngle As Single)
+        'カメラの向きに角度を追加
+        cameraHorizAngle += horizAngle
+        cameraVertAngle += vertAngle
+
+        '行列を再計算
+        cameraMatrix = Matrix4.CreateTranslation(cameraPosition)
+        cameraMatrix = cameraMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitY, cameraHorizAngle)
+        cameraMatrix = cameraMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitX, cameraVertAngle)
+    End Sub
+
+    ''' <summary>
+    ''' カメラの位置（視点）を変更する
+    ''' distance: 水平方向、上下方向、前後方向の距離
+    ''' </summary>
+    ''' <param name="distance"></param>
+    Public Sub MoveCamera(distance As Vector3)
+        Dim m As Matrix4 = Matrix4.CreateFromAxisAngle(Vector3.UnitX, -cameraVertAngle)
+        m = m * Matrix4.CreateFromAxisAngle(Vector3.UnitY, -cameraHorizAngle) 'm=カメラの向きを表す行列
+        m = Matrix4.CreateTranslation(distance) * m 'パラメータの向きをカメラの向きに変換する
+        cameraPosition += m.ExtractTranslation() '現在位置に加算
+
+        '行列を再計算
+        cameraMatrix = Matrix4.CreateTranslation(cameraPosition)
+        cameraMatrix = cameraMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitY, cameraHorizAngle)
+        cameraMatrix = cameraMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitX, cameraVertAngle)
+    End Sub
+
     Private Sub glControl_MouseDown(sender As Object, e As MouseEventArgs)
-        'If e.Button = MouseButtons.Left Then
         mousePos = New Point(e.X, e.Y)
-        'End If
     End Sub
 
     Private Sub glControl_MouseMove(sender As Object, e As MouseEventArgs)
         If e.Button = MouseButtons.Right Then
             '視線移動
-            modelHorizAngle += CSng(e.X - mousePos.X) / CSng(sender.Width) * 2 * Math.PI
-            modelVertAngle += CSng(e.Y - mousePos.Y) / CSng(sender.height) * 2 * Math.PI
+            TurnCamera(CSng(e.X - mousePos.X) / CSng(Me.Width) * 2 * Math.PI, CSng(e.Y - mousePos.Y) / CSng(Me.Height) * 2 * Math.PI)
 
-            eyeMatrix = Matrix4.CreateTranslation(eyePosition)
-            eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitY, modelHorizAngle)
-            eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitX, modelVertAngle)
+            'modelHorizAngle += CSng(e.X - mousePos.X) / CSng(sender.Width) * 2 * Math.PI
+            'modelVertAngle += CSng(e.Y - mousePos.Y) / CSng(sender.height) * 2 * Math.PI
+
+            'eyeMatrix = Matrix4.CreateTranslation(eyePosition)
+            'eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitY, modelHorizAngle)
+            'eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitX, modelVertAngle)
 
             mousePos = New Point(e.X, e.Y)
         ElseIf e.Button = MouseButtons.Left Then
             '視点移動
-            Dim m As Matrix4 = Matrix4.CreateFromAxisAngle(Vector3.UnitX, -modelVertAngle)
-            m = m * Matrix4.CreateFromAxisAngle(Vector3.UnitY, -modelHorizAngle)
+            MoveCamera(New Vector3(CSng(e.X - mousePos.X) * 0.005F * cameraDistance, -CSng(e.Y - mousePos.Y) * 0.005F * cameraDistance, 0.0F))
+            'Dim m As Matrix4 = Matrix4.CreateFromAxisAngle(Vector3.UnitX, -modelVertAngle)
+            'm = m * Matrix4.CreateFromAxisAngle(Vector3.UnitY, -modelHorizAngle)
 
-            Dim dx As Single = CSng(e.X - mousePos.X) * 0.005F * eyeDistance
-            Dim dy As Single = -CSng(e.Y - mousePos.Y) * 0.005F * eyeDistance
-            m = Matrix4.CreateTranslation(dx, dy, 0) * m
+            'Dim dx As Single = CSng(e.X - mousePos.X) * 0.005F * eyeDistance
+            'Dim dy As Single = -CSng(e.Y - mousePos.Y) * 0.005F * eyeDistance
+            'm = Matrix4.CreateTranslation(dx, dy, 0) * m
 
-            eyePosition += m.ExtractTranslation()
+            'eyePosition += m.ExtractTranslation()
 
 
-            eyeMatrix = Matrix4.CreateTranslation(eyePosition)
-            eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitY, modelHorizAngle)
-            eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitX, modelVertAngle)
+            'eyeMatrix = Matrix4.CreateTranslation(eyePosition)
+            'eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitY, modelHorizAngle)
+            'eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitX, modelVertAngle)
 
             mousePos = New Point(e.X, e.Y)
         End If
@@ -456,59 +517,64 @@ Public Class View3D
 
     Private Sub glControl_MouseWheel(sender As Object, e As MouseEventArgs)
 
-        Dim yang As Single = (e.Y / Me.Height - 0.5F) * MathHelper.PiOver4
-        Dim xang As Single = (e.X / Me.Width - 0.5F) * MathHelper.PiOver4 * Me.Width / Me.Height
+        Dim yang As Single = (e.Y / Me.Height - 0.5F) * viewingAngleV
+        Dim xang As Single = (e.X / Me.Width - 0.5F) * viewingAngleV * Me.Width / Me.Height
 
         '視点移動
-        Dim m As Matrix4 = Matrix4.CreateFromAxisAngle(Vector3.UnitX, -modelVertAngle - yang)
-        m = m * Matrix4.CreateFromAxisAngle(Vector3.UnitY, -modelHorizAngle - xang)
+        Dim m As Matrix4 = Matrix4.CreateFromAxisAngle(Vector3.UnitX, -cameraVertAngle - yang)
+        m = m * Matrix4.CreateFromAxisAngle(Vector3.UnitY, -cameraHorizAngle - xang)
         m = Matrix4.CreateTranslation(0.0F, 0.0F, e.Delta / 10.0F) * m
 
-        eyePosition += m.ExtractTranslation()
+        MoveCameraXYZ(m.ExtractTranslation())
+
+        'eyePosition += m.ExtractTranslation()
 
 
-        eyeMatrix = Matrix4.CreateTranslation(eyePosition)
-        eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitY, modelHorizAngle)
-        eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitX, modelVertAngle)
-
-
-        'eyeDistance *= Math.Pow(1.2, CSng(e.Delta) / 240.0F)
-
-        ''拡大、縮小の制限
-        'If eyeDistance > 300.0F Then eyeDistance = 300.0F
-        'If eyeDistance < 10.0F Then eyeDistance = 10.0F
+        'eyeMatrix = Matrix4.CreateTranslation(eyePosition)
+        'eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitY, modelHorizAngle)
+        'eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitX, modelVertAngle)
     End Sub
 
-    'Public Sub DisposeObject()
-    '    For i As Integer = 0 To arVAO.Count - 1
-    '        If arVAO(i) IsNot Nothing Then
-    '            arVAO(i).Dispose()
-    '        End If
-    '        'If arTOBJ(i) IsNot Nothing Then
-    '        '    arTOBJ(i).Dispose()
-    '        'End If
-    '    Next
-    '    arVAO.Clear()
-    '    'arTOBJ.Clear()
-    'End Sub
+    ''' <summary>
+    ''' バッファオブジェクトによって割り当てられた頂点バッファなどを解放し、
+    ''' 管理用配列からバッファオブジェクトを除外します。
+    ''' テクスチャは別途破棄する必要があります。
+    ''' アプリケーションの終了時にわざわざ呼び出す必要はありません。
+    ''' </summary>
+    ''' <param name="bo"></param>
+    ''' <returns></returns>
+    Public Function DeleteBufferObject(ByRef bo As BufferObject) As Boolean
+        If bo Is Nothing Then Return False
 
-    'Public Sub DisposeObject(index As Integer)
-    '    If index < 0 OrElse index >= arVAO.Count Then
-    '        Debug.Print("Invalid index for DisposeObject")
-    '        Exit Sub
-    '    End If
-    '    If arVAO(index) IsNot Nothing Then
-    '        arVAO(index).Dispose()
-    '        arVAO(index) = Nothing
-    '    End If
-    '    'If arTOBJ(index) IsNot Nothing Then
-    '    '    arTOBJ(index).Dispose()
-    '    '    arTOBJ(index) = Nothing
-    '    'End If
-    'End Sub
+        '頂点バッファが登録済みであれば削除する
+        If bo._vao <> 0 Then
+            GL.DeleteVertexArray(bo._vao)
+            bo._vao = 0
+        End If
+        If bo._vbo <> 0 Then
+            GL.DeleteBuffers(1, bo._vbo)
+            bo._vbo = 0
+        End If
+        If bo._ibo <> 0 Then
+            GL.DeleteBuffers(1, bo._ibo)
+            bo._ibo = 0
+            bo._numIndex = 0
+        End If
 
-    '登録されたテクスチャを削除する。ビットマップ指定
-    Public Sub DeleteTexture(bmp As Bitmap)
+        '管理配列から削除する
+        arBO.Remove(bo)
+        Return True
+    End Function
+
+    ''' <summary>
+    ''' SetTexture()によって割り当てられたテクスチャバッファを削除し、
+    ''' 管理用配列からも除外します。
+    ''' bmpにはSetTexture()呼び出し時に使用したビットマップを渡します。
+    ''' アプリケーションの終了時にわざわざ呼び出す必要はありません。
+    ''' </summary>
+    ''' <param name="bmp"></param>
+    ''' <returns></returns>
+    Public Function DeleteTexture(bmp As Bitmap) As Boolean
         For i As Integer = 0 To arTxt.Count - 1
             Dim ti As TextureInfo = arTxt(i)
             If ti.bmp Is bmp Then
@@ -517,26 +583,40 @@ Public Class View3D
                     ti.txt = 0
                 End If
                 arTxt.RemoveAt(i)
-                Exit For
+                Return True
             End If
         Next
-    End Sub
+        Return False
+    End Function
 
-    '登録されたテクスチャを削除する。id指定
-    Public Sub DeleteTexture(txt As Integer)
-        If txt <= 0 Then Exit Sub
-        For i As Integer = 0 To arTxt.Count - 1
-            Dim ti As TextureInfo = arTxt(i)
-            If ti.txt = txt Then
-                GL.DeleteTexture(txt)
-                arTxt.RemoveAt(i)
-                Exit For
-            End If
-        Next
-    End Sub
+    ''' <summary>
+    ''' SetTexture()によって割り当てられたテクスチャバッファを削除し、管理用配列からも除外します。
+    ''' txtにはSetTexture()呼び出し時に返された、テクスチャバッファIDを渡します。
+    ''' アプリケーションの終了時にわざわざ呼び出す必要はありません。
+    ''' </summary>
+    ''' <param name="txt"></param>
+    ''' <returns></returns>
+    Public Function DeleteTexture(txt As Integer) As Boolean
+        If txt > 0 Then
+            For i As Integer = 0 To arTxt.Count - 1
+                Dim ti As TextureInfo = arTxt(i)
+                If ti.txt = txt Then
+                    GL.DeleteTexture(txt)
+                    arTxt.RemoveAt(i)
+                    Return True
+                End If
+            Next
+        End If
+        Return False
+    End Function
 
-    'テクスチャを追加する。または既に登録されたビットマップの場合は置換する
-    '関数はテクスチャidを返す。置換の場合でも同じidを返すとは限らないので、ビットマップで管理するのが楽
+    ''' <summary>
+    ''' ビットマップをテクスチャバッファに登録または更新し、そのバッファIDを返します。
+    ''' ビットマップが既に登録されたものであれば、テクスチャバッファを解放後、再度イメージをロードします。
+    ''' 関数はいずれの場合もバッファIDを返します。
+    ''' </summary>
+    ''' <param name="bmp"></param>
+    ''' <returns></returns>
     Public Function SetTexture(bmp As Bitmap) As Integer
         Dim newTexture As Boolean = True
         Dim ti As TextureInfo = Nothing
@@ -582,134 +662,74 @@ Public Class View3D
         bmp.UnlockBits(Data)
         GL.BindTexture(TextureTarget.Texture2D, 0)
 
-        If newTexture Then
-            'テクスチャ管理配列に追加
-            arTxt.Add(ti)
-        End If
+        'テクスチャ管理配列に追加
+        If newTexture Then arTxt.Add(ti)
         Return ti.txt
     End Function
 
-
-    'Public Sub Invalidate()
-    '    Me.Invalidate()
-    'End Sub
-
-    'Public Sub SetModel(bo As BufferObject, Optional tobj As TextureObject = Nothing)
-    '    DisposeObject()
-    '    vao = bo.GenerateVAO()
-    '    Me.tobj = tobj
-    'End Sub
-
-    ''モデルを追加する
-    ''返されるインデックスは後からモデルを入れ替えるか、個別に削除する場合に用いる。個別処理を行わない場合は記憶する必要は無い
-    'Public Function AddModel(bo As BufferObject) As Integer
-    '    arVAO.Add(bo.GenerateVAO())
-    '    'arTOBJ.Add(tobj)
-    '    Return arVAO.Count - 1
-    'End Function
-
-    ''モデルを差し替える
-    'Public Sub SetModel(index As Integer, bo As BufferObject, Optional tobj As TextureObject = Nothing)
-    '    If index < 0 OrElse index >= arVAO.Count Then
-    '        Debug.Print("Invalid index for SetModel")
-    '        Exit Sub
-    '    End If
-    '    DisposeObject(index)
-    '    arVAO(index) = bo.GenerateVAO()
-    '    'arTOBJ(index) = tobj
-    'End Sub
-
-    ''追加したモデルを更新します。boを指定しない場合はすべてのモデルを更新します
-    'Public Function RebuildVAO(Optional ByRef bo As BufferObject = Nothing) As Integer
-    '    If bo Is Nothing Then
-    '        'VAO削除
-    '        While arVAO.Count > 0
-    '            arVAO.Last.Dispose()
-    '            arVAO.RemoveAt(arVAO.Count - 1)
-    '        End While
-    '        'VAO再構築
-    '        For Each b As BufferObject In arBO
-    '            arVAO.Add(b.GenerateVAO)
-    '        Next
-    '        Return arVAO.Count
-    '    Else
-    '        Dim i As Integer = arBO.IndexOf(bo)
-    '        If i >= 0 Then
-    '            'VAO削除
-    '            arVAO(i).Dispose()
-    '            'VAO再構築
-    '            arVAO(i) = arBO(i).GenerateVAO
-    '            Return 1
-    '        Else
-    '            Return 0
-    '        End If
-    '    End If
-    'End Function
-
-    'Public Function HasBufferObject(ByRef bo As BufferObject) As Boolean
-    '    Return arBO.IndexOf(bo) >= 0
-    'End Function
-
-    ''モデルを追加する
-    ''これ以降にboを変更した場合はRebuild()実行することでVAOに変更が適用される
-    'Public Sub AddBufferObject(ByRef bo As BufferObject)
-    '    arBO.Add(bo)
-    '    arVAO.Add(bo.GenerateVAO)
-    'End Sub
-
-    ''モデルを削除する
-    'Public Function RemoveBufferObject(Optional ByRef bo As BufferObject = Nothing) As Integer
-    '    If bo Is Nothing Then
-    '        If arBO.Count > 0 Then
-    '            'VAO削除
-    '            While arVAO.Count > 0
-    '                arVAO.Last.Dispose()
-    '                arVAO.RemoveAt(arVAO.Count - 1)
-    '            End While
-    '            Dim n As Integer = arBO.Count
-    '            arBO.Clear()
-    '            Return n
-    '        Else
-    '            Return 0
-    '        End If
-    '    Else
-    '        Dim i As Integer = arBO.IndexOf(bo)
-    '        If i >= 0 Then
-    '            Debug.Print("View3D RemoveBufferObject index=" & i)
-    '            arBO.RemoveAt(i)
-    '            arVAO(i).Dispose()
-    '            arVAO.RemoveAt(i)
-    '            Return 1
-    '        Else
-    '            Return 0
-    '        End If
-    '    End If
-    'End Function
-
-    '2Dモデルを表示するとき、指定されたz値における、視界のXY平面境界を返す
-    '例えば、2Dモデルを画面の右上などに表示する場合に使うと便利
-    'この値はウィンドウサイズ(幅)が変更されたときに変化する
-    Public Function GetVisibleEdgeFor2D(zValue As Single) As RectangleF
-        Dim a As Single = eyeDistance - zValue
+    ''' <summary>
+    ''' Z座標における、XY平面の表示エリアの境界線をRectangleFで返す
+    ''' 2Dモデルを画面の端に表示したい場合、この関数の返す境界を使って座標を決定することができる
+    ''' この関数はビューポートが変更されると返す値が変化するため、通常は ViewportResized ハンドラを使って再計算、再配置する
+    ''' </summary>
+    ''' <param name="zValue"></param>
+    ''' <returns></returns>
+    Public Function GetVisibleEdgeFor2D(Optional zValue As Single = 0.0F) As RectangleF
+        Dim a As Single = cameraDistance - zValue
         Dim c As Single = a / Math.Cos(viewingAngleV / 2.0F)
         Dim b As Single = Math.Sqrt(c * c - a * a)
         Dim d As Single = CSng(Me.Width) / CSng(Me.Height) * b
         Return New RectangleF(-d, b, d * 2.0F, -b * 2.0F)
     End Function
 
-    '3Dオブジェクトを作成するためのBufferObjectを取得する
+    ''' <summary>
+    ''' 3Dオブジェクトを構築するためのBufferObjectを返す
+    ''' この関数が実行された時点で、返されたBufferObjectは描画対象としてView3D内の管理配列に保存されます
+    ''' View3Dの管理対象から削除するにはDeleteBufferObject()を呼び出します
+    ''' パラメータは頂点バッファのデータ構成を指定します
+    ''' bNormal: 法線ベクトルを使う（照明による陰影処理に必要）
+    ''' bTexture: テクスチャ座標を持つ（テクスチャを貼り付ける場合に必要）
+    ''' bColor: 頂点カラーを持つ（テクスチャやマテリアルを使わずに色をつける場合）
+    ''' </summary>
+    ''' <param name="bNormal"></param>
+    ''' <param name="bTexture"></param>
+    ''' <param name="bColor"></param>
+    ''' <returns></returns>
     Public Function Create3DObject(bNormal As Boolean, bTexture As Boolean, bColor As Boolean) As BufferObject
         arBO.Add(New BufferObject(Me, True, bNormal, bTexture, bColor, False))
         Return arBO.Last
     End Function
 
-    'カメラの位置の影響を受けない2Dオブジェクトを作成するためのBufferObjectを取得する
+    ''' <summary>
+    ''' カメラの位置や向きに依存しない、2Dオブジェクトを構築するためのBufferObjectを返す
+    ''' この関数が実行された時点で、返されたBufferObjectは描画対象としてView3D内の管理配列に保存されます
+    ''' View3Dの管理対象から削除するにはDeleteBufferObject()を呼び出します
+    ''' パラメータは頂点バッファのデータ構成を指定します
+    ''' bNormal: 法線ベクトルを使う（照明による陰影処理に必要）
+    ''' bTexture: テクスチャ座標を持つ（テクスチャを貼り付ける場合に必要）
+    ''' bColor: 頂点カラーを持つ（テクスチャやマテリアルを使わずに色をつける場合）
+    ''' </summary>
+    ''' <param name="bNormal"></param>
+    ''' <param name="bTexture"></param>
+    ''' <param name="bColor"></param>
+    ''' <returns></returns>
     Public Function Create2DObject(bNormal As Boolean, bTexture As Boolean, bColor As Boolean) As BufferObject
         arBO.Add(New BufferObject(Me, False, bNormal, bTexture, bColor, False))
         Return arBO.Last
     End Function
 
-    'カメラの位置の影響を受ける2Dオブジェクトを作成するためのBufferObjectを取得する
+    ''' <summary>
+    ''' ポイントスプライトに対応したオブジェクトを構築するためのBufferObjectを返す
+    ''' ポイントスプライトとは、3Dオブジェクトながら常にこちらを向いたテクスチャを表示するようなものです
+    ''' この関数が実行された時点で、返されたBufferObjectは描画対象としてView3D内の管理配列に保存されます
+    ''' View3Dの管理対象から削除するにはDeleteBufferObject()を呼び出します
+    ''' パラメータは頂点バッファのデータ構成を指定します
+    ''' bTexture: テクスチャ座標を持つ（テクスチャを貼り付ける場合に必要）
+    ''' bColor: 頂点カラーを持つ（テクスチャやマテリアルを使わずに色をつける場合）
+    ''' </summary>
+    ''' <param name="bTexture"></param>
+    ''' <param name="bColor"></param>
+    ''' <returns></returns>
     Public Function CreateProintSprite(bTexture As Boolean, bColor As Boolean) As BufferObject
         arBO.Add(New BufferObject(Me, True, False, bTexture, bColor, True))
         Return arBO.Last
@@ -717,6 +737,8 @@ Public Class View3D
 
     '光源を管理
     Public Class Light
+
+        '光源の基本パラメータ
         Public Position As Vector4
         Public Ambient As Color4
         Public Diffuse As Color4
@@ -728,6 +750,9 @@ Public Class View3D
 
         Public Active As Boolean = True
 
+        ''' <summary>
+        ''' 適当な平行光源が作成されます
+        ''' </summary>
         Sub New()
             '適当
             Position = New Vector4(200.0F, 150.0F, 500.0F, 0.0F)
@@ -736,6 +761,14 @@ Public Class View3D
             Specular = New Color4(1.0F, 1.0F, 1.0F, 1.0F)
             Active = True
         End Sub
+
+        ''' <summary>
+        ''' 詳細を指定して光源を作成します
+        ''' </summary>
+        ''' <param name="position"></param>
+        ''' <param name="ambient"></param>
+        ''' <param name="diffuse"></param>
+        ''' <param name="specular"></param>
         Public Sub New(position As Vector4, ambient As Color4, diffuse As Color4, specular As Color4)
             Me.Position = position
             Me.Ambient = ambient
@@ -744,16 +777,34 @@ Public Class View3D
             Active = True
         End Sub
 
-        '平行光源を作成。ambient=0.0～1.0
+        ''' <summary>
+        ''' 平行光源を作成します。平行光源とは太陽のような位置に依らず、平行に光を発する光源です
+        ''' direction: 光の向き
+        ''' color: 色
+        ''' ambient: 環境光の強さ 0.0F～1.0F
+        ''' </summary>
+        ''' <param name="direction"></param>
+        ''' <param name="color"></param>
+        ''' <param name="ambient"></param>
+        ''' <returns></returns>
         Public Shared Function CreateParallelLight(direction As Vector3, color As Color4, ambient As Single) As Light
             Return New Light(
                 New Vector4(direction, 0.0F),
-                New Color4(ambient * color.R, ambient * color.G, ambient * color.B, ambient * color.A),
+                New Color4(ambient * color.R, ambient * color.G, ambient * color.B, 1.0F),
                 color,
                 color)
         End Function
 
-        '点光源を作成。ambient=0.0～1.0
+        ''' <summary>
+        ''' 点光源を作成します。点光源とは電球のようにある位置から全方向を照らす光源です
+        ''' position: 電球の位置
+        ''' color: 色
+        ''' ambient: 環境光の強さ 0.0F～1.0F
+        ''' </summary>
+        ''' <param name="position"></param>
+        ''' <param name="color"></param>
+        ''' <param name="ambient"></param>
+        ''' <returns></returns>
         Public Shared Function CreatePointLight(position As Vector3, color As Color4, ambient As Single) As Light
             Return New Light(
                 New Vector4(position, 1.0F),
@@ -798,6 +849,9 @@ Public Class View3D
         Public Specular As Color4
         Public Shininess As Single
 
+        ''' <summary>
+        ''' 適当なマテリアルを作成します
+        ''' </summary>
         Public Sub New()
             '適当な材質
             Ambient = New Color4(0.2F, 0.2F, 0.2F, 1.0F)
@@ -806,6 +860,13 @@ Public Class View3D
             Shininess = 51.4F
         End Sub
 
+        ''' <summary>
+        ''' 詳細を指定してマテリアルを作成します
+        ''' </summary>
+        ''' <param name="ambient"></param>
+        ''' <param name="diffuse"></param>
+        ''' <param name="specular"></param>
+        ''' <param name="shininess"></param>
         Public Sub New(ambient As Color4, diffuse As Color4, specular As Color4, shininess As Single)
             Me.Ambient = ambient
             Me.Diffuse = diffuse
@@ -813,6 +874,11 @@ Public Class View3D
             Me.Shininess = shininess
         End Sub
 
+        ''' <summary>
+        ''' マテリアルをプリセットから作成します
+        ''' </summary>
+        ''' <param name="type"></param>
+        ''' <returns></returns>
         Public Shared Function FromPreset(type As Preset) As Material
             Dim m As New Material
             Select Case type
@@ -979,6 +1045,11 @@ Public Class View3D
         Friend _numIndex As Integer = 0
         Friend _bm As BeginMode
 
+        ''' <summary>
+        ''' テクスチャに使用するビットマップを取得または設定します
+        ''' 実際に使用するには、ビットマップはこのプロパティと、View3D.SetTexture()の両方で設定されていないといけません
+        ''' </summary>
+        ''' <returns></returns>
         Public Property Texture As Bitmap
             Get
                 Return _bmp
@@ -1033,14 +1104,19 @@ Public Class View3D
             _arb.AddRange(BitConverter.GetBytes(c.A))
         End Sub
 
-        '点を追加する
-        Public Sub AddPoints(ar As Vector3())
+        ''' <summary>
+        ''' ポイントを追加します
+        ''' ポイント以外のプリミティブが設定されていた場合はFalseを返します
+        ''' </summary>
+        ''' <param name="ar"></param>
+        ''' <returns></returns>
+        Public Function AddPoints(ar As Vector3()) As Boolean
             If _numVertex = 0 Then
                 _primitive = BeginMode.Points
                 Lighting = False
             ElseIf _primitive <> BeginMode.Points Then
                 Debug.Print("ポイント、ライン、トライアングルなどのプリミティブを１つのBufferObjectに混在させることはできません")
-                Exit Sub
+                Return False
             End If
 
             For Each p As Vector3 In ar
@@ -1054,16 +1130,24 @@ Public Class View3D
                 _ari.Add(_numVertex)
                 _numVertex += 1
             Next
-        End Sub
+            Return True
+        End Function
 
-        '点を追加する
-        Public Sub AddPoint(p1 As Vector3, c1 As Color4)
+        ''' <summary>
+        ''' ポイントと頂点カラーを追加します
+        ''' ポイント以外のプリミティブが設定されていた場合はFalseを返します
+        ''' c1: 頂点カラー（頂点バッファが頂点カラーを持っていない場合は設定されません）
+        ''' </summary>
+        ''' <param name="p1"></param>
+        ''' <param name="c1"></param>
+        ''' <returns></returns>
+        Public Function AddPoint(p1 As Vector3, c1 As Color4) As Boolean
             If _numVertex = 0 Then
                 _primitive = BeginMode.Points
                 Lighting = False
             ElseIf _primitive <> BeginMode.Points Then
                 Debug.Print("ポイント、ライン、トライアングルなどのプリミティブを１つのBufferObjectに混在させることはできません")
-                Exit Sub
+                Return False
             End If
 
             '頂点バッファに追加
@@ -1075,16 +1159,26 @@ Public Class View3D
             'インデックスを追加
             _ari.Add(_numVertex)
             _numVertex += 1
-        End Sub
+            Return True
+        End Function
 
-        'ラインを追加する
-        Public Sub AddLine(p1 As Vector3, c1 As Color4, p2 As Vector3, c2 As Color4)
+        ''' <summary>
+        ''' ラインと頂点カラーを追加します
+        ''' ライン以外のプリミティブが設定されていた場合はFalseを返します
+        ''' c1,c2: p1,p2に対応する頂点カラー（頂点バッファが頂点カラーを持っていない場合は設定されません）
+        ''' </summary>
+        ''' <param name="p1"></param>
+        ''' <param name="c1"></param>
+        ''' <param name="p2"></param>
+        ''' <param name="c2"></param>
+        ''' <returns></returns>
+        Public Function AddLine(p1 As Vector3, c1 As Color4, p2 As Vector3, c2 As Color4) As Boolean
             If _numVertex = 0 Then
                 _primitive = BeginMode.Lines
                 Lighting = False
             ElseIf _primitive <> BeginMode.Lines Then
                 Debug.Print("ポイント、ライン、トライアングルなどのプリミティブを１つのBufferObjectに混在させることはできません")
-                Exit Sub
+                Return False
             End If
 
             '頂点バッファに追加
@@ -1101,16 +1195,30 @@ Public Class View3D
             _ari.Add(_numVertex)
             _ari.Add(_numVertex + 1)
             _numVertex += 2
-        End Sub
+            Return True
+        End Function
 
-        'トライアングルを追加する（頂点カラー）
-        Public Sub AddTriangle(p1 As Vector3, c1 As Color4, p2 As Vector3, c2 As Color4, p3 As Vector3, c3 As Color4)
+        ''' <summary>
+        ''' 三角形と頂点カラーを追加します
+        ''' 三角形以外のプリミティブが設定されていた場合はFalseを返します
+        ''' c1,c2,c3: p1,p2,p3に対応する頂点カラー（頂点バッファが頂点カラーを持っていない場合は設定されません）
+        ''' 頂点バッファが法線ベクトルを持っている場合は、各頂点からの計算値が代入されます。
+        ''' 三角形は時計回りの頂点の並びが「表面」として処理されます
+        ''' </summary>
+        ''' <param name="p1"></param>
+        ''' <param name="c1"></param>
+        ''' <param name="p2"></param>
+        ''' <param name="c2"></param>
+        ''' <param name="p3"></param>
+        ''' <param name="c3"></param>
+        ''' <returns></returns>
+        Public Function AddTriangle(p1 As Vector3, c1 As Color4, p2 As Vector3, c2 As Color4, p3 As Vector3, c3 As Color4) As Boolean
             If _numVertex = 0 Then
                 _primitive = BeginMode.Triangles
-                Lighting = False
+                Lighting = True
             ElseIf _primitive <> BeginMode.Triangles Then
                 Debug.Print("ポイント、ライン、トライアングルなどのプリミティブを１つのBufferObjectに混在させることはできません")
-                Exit Sub
+                Return False
             End If
 
             '必要に応じて法線を計算
@@ -1139,16 +1247,31 @@ Public Class View3D
             _ari.Add(_numVertex + 1)
             _ari.Add(_numVertex + 2)
             _numVertex += 3
-        End Sub
 
-        'トライアングルを追加する（テクスチャ）
-        Public Sub AddTriangle(p1 As Vector3, t1 As Vector2, p2 As Vector3, t2 As Vector2, p3 As Vector3, t3 As Vector2)
+            Return True
+        End Function
+
+        ''' <summary>
+        ''' 三角形とテクスチャ座標を追加します
+        ''' 三角形以外のプリミティブが設定されていた場合はFalseを返します
+        ''' t1,t2,t3: p1,p2,p3に対応するテクスチャ座標（頂点バッファがテクスチャ座標を持っていない場合は設定されません）
+        ''' 頂点バッファが法線ベクトルを持っている場合は、各頂点からの計算値が代入されます。
+        ''' 三角形は時計回りの頂点の並びが「表面」として処理されます
+        ''' </summary>
+        ''' <param name="p1"></param>
+        ''' <param name="t1"></param>
+        ''' <param name="p2"></param>
+        ''' <param name="t2"></param>
+        ''' <param name="p3"></param>
+        ''' <param name="t3"></param>
+        ''' <returns></returns>
+        Public Function AddTriangle(p1 As Vector3, t1 As Vector2, p2 As Vector3, t2 As Vector2, p3 As Vector3, t3 As Vector2) As Boolean
             If _numVertex = 0 Then
                 _primitive = BeginMode.Triangles
                 Lighting = True
             ElseIf _primitive <> BeginMode.Triangles Then
                 Debug.Print("ポイント、ライン、トライアングルなどのプリミティブを１つのBufferObjectに混在させることはできません")
-                Exit Sub
+                Return False
             End If
 
             '必要に応じて法線を計算
@@ -1177,17 +1300,36 @@ Public Class View3D
             _ari.Add(_numVertex + 1)
             _ari.Add(_numVertex + 2)
             _numVertex += 3
-        End Sub
+            Return True
+        End Function
 
-        '四角形(トライアングル×２)を追加する（テクスチャ）
-        'divに分割数を設定できる。例えばdiv=2のとき、４枚の四角形(8枚の三角形)が作られる
-        Public Sub AddQuad(p1 As Vector3, t1 As Vector2, p2 As Vector3, t2 As Vector2, p3 As Vector3, t3 As Vector2, p4 As Vector3, t4 As Vector2, Optional div As Integer = 1)
+        ''' <summary>
+        ''' 四角形とテクスチャ座標を追加します
+        ''' １つの四角形は２つの三角形で表されます
+        ''' 三角形以外のプリミティブが設定されていた場合はFalseを返します
+        ''' t1,t2,t3,t4: p1～p4に対応するテクスチャ座標（頂点バッファがテクスチャ座標を持っていない場合は設定されません）
+        ''' div: 四角形を分割して作成します。例えば、div=2の場合、4毎の四角形⇒8毎の三角形が作成されます。デフォルトは1で分割されません
+        ''' 頂点バッファが法線ベクトルを持っている場合は、各頂点からの計算値が代入されます。
+        ''' 四角形は時計回りの頂点の並びが「表面」として処理されます
+        ''' </summary>
+        ''' <param name="p1"></param>
+        ''' <param name="t1"></param>
+        ''' <param name="p2"></param>
+        ''' <param name="t2"></param>
+        ''' <param name="p3"></param>
+        ''' <param name="t3"></param>
+        ''' <param name="p4"></param>
+        ''' <param name="t4"></param>
+        ''' <param name="div"></param>
+        ''' <returns></returns>
+        Public Function AddQuad(p1 As Vector3, t1 As Vector2, p2 As Vector3, t2 As Vector2, p3 As Vector3, t3 As Vector2,
+                                p4 As Vector3, t4 As Vector2, Optional div As Integer = 1) As Boolean
             If _numVertex = 0 Then
                 _primitive = BeginMode.Triangles
                 Lighting = True
             ElseIf _primitive <> BeginMode.Triangles Then
                 Debug.Print("ポイント、ライン、トライアングルなどのプリミティブを１つのBufferObjectに混在させることはできません")
-                Exit Sub
+                Return False
             End If
 
             '必要に応じて法線を計算
@@ -1270,10 +1412,14 @@ Public Class View3D
             '_ari.Add(_numVertex + 2)
             '_ari.Add(_numVertex + 3)
             '_numVertex += 4
-        End Sub
+            Return True
+        End Function
 
-        '頂点やインデックスデータをOpenGLに登録する。変更したデータを反映する場合もこの関数を呼び出す
-        'プロパティのActiveはデフォルトでTrueなので、この関数によりすぐに表示される
+        ''' <summary>
+        ''' AddLine()などで追加された頂点データをOpenGLのバッファに設定します。
+        ''' 既にバッファに設定している場合は、一旦削除して、最新の頂点データで再設定を行います。
+        ''' これによりBufferObjectが表示されるようになります。
+        ''' </summary>
         Public Sub Generate()
 
             '頂点バッファが登録済みであれば削除する

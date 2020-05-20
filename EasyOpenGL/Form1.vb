@@ -19,6 +19,13 @@ Public Class Form1
     'このテクスチャは１秒毎に更新するため、変数を宣言
     Private framerateTexture As Bitmap
 
+    'フレームレートを表示するための四角形オブジェクト
+    'ビューポートが変更されたときに位置を再設定する必要があるため、変数を宣言
+    Private boFramerate As View3D.BufferObject
+
+    'テクスチャに書き出す時に使うフォント
+    Private textureFont As New Font(Me.Font.FontFamily.Name, 30.0F) '30=height 48px
+
 
     Private Sub Form1_Load(sender As Object, e As EventArgs) Handles MyBase.Load
 
@@ -27,8 +34,9 @@ Public Class Form1
         'View3DクラスはOpenTK.GLControlから継承しているため、同様にフォームデザイナで使用できません。
         'そのため、ここではForm1上にPanel1を配置し、そこへ以下のコードでView3Dクラスのv3dを配置しています。
 
-        v3d = New View3D
+        v3d = New View3D()
         AddHandler v3d.LoadModel, AddressOf v3d_LoadModel
+        AddHandler v3d.ViewportResized, AddressOf v3d_ViewportResized
         AddHandler v3d.Tick, AddressOf v3d_Tick
         With v3d
             .Dock = System.Windows.Forms.DockStyle.Fill
@@ -40,20 +48,17 @@ Public Class Form1
             .LimitFPS = 30
         End With
         Panel1.Controls.Add(v3d)
-        AddHandler Application.Idle, AddressOf Application_Idle
     End Sub
 
-    '3Dビューを継続して更新するために呼び出しています
-    Private Sub Application_Idle(sender As Object, e As EventArgs)
-        v3d.Invalidate()
-    End Sub
 
     '3Dビューが初期化されるタイミングで呼び出されます
     '例えばタブビューなどに配置されている場合は、実際に表示されるタイミングまでこの関数は呼び出されません。
     Private Sub v3d_LoadModel(sender As View3D)
         Debug.Print("LoadModel")
 
+        '
         '照明を設定
+        '
 
         '平行光源（手前右上から照らす）
         v3d.SetLight(0, View3D.Light.CreateParallelLight(New Vector3(1.0F, 2.0F, 1.5F), Color4.White, 0.8F))
@@ -61,6 +66,10 @@ Public Class Form1
         '点光源（サイコロの左から照らす）※下記定数のdivを参照のこと
         v3d.SetLight(1, View3D.Light.CreatePointLight(New Vector3(-12.0F, 0.0F, 5.0F), Color4.Red, 0.0F))
 
+
+        '
+        'モデルを追加していく
+        '
 
         'XZ平面と座標軸を書く。単位はcm
         Dim bo As View3D.BufferObject = v3d.Create3DObject(bNormal:=False, bTexture:=False, bColor:=True)
@@ -82,14 +91,14 @@ Public Class Form1
         For i As Integer = 0 To 2 'X,Y,Z
 
             '座標軸のアルファベット表示用のテクスチャを準備
-            texture = New Bitmap(16, 16)
+            texture = New Bitmap(48, 48)
             Dim g As Drawing.Graphics = Drawing.Graphics.FromImage(texture)
             Dim brush As New SolidBrush(Color.FromArgb(0, 0, 0, 0))                         '背景を透明にしたいのでA=0のブラシを作成
             g.CompositingMode = Drawing2D.CompositingMode.SourceCopy                        '透明色を上書き
             g.FillRectangle(brush, 0, 0, texture.Width, texture.Height)
             brush.Dispose()
             g.CompositingMode = Drawing2D.CompositingMode.SourceOver                        '通常モードに戻す
-            g.DrawString(Chr(88 + i), Me.Font, Brushes.White, New Point(0, 0))              'テキストを描画 X Y Z
+            g.DrawString(Chr(88 + i), textureFont, Brushes.White, New Point(0, 0))              'テキストを描画 X Y Z
             g.Dispose()
 
             '作成したテクスチャを登録する
@@ -109,31 +118,31 @@ Public Class Form1
         Next
 
         'FPS表示用のテクスチャを準備
-        framerateTexture = New Bitmap(30, 20)   'テクスチャを作成
-        drawFramerateToTexture()                'テクスチャに描画＆登録
+        framerateTexture = New Bitmap(100, 48)   'テクスチャを作成
+        DrawFramerateToTexture()                'テクスチャに描画＆登録
 
         'フレームレートテクスチャを貼り付けるポリゴンを2Dで作成する
         '2Dで作成するとカメラの位置の影響を受けなくなる
         'この場合の座標系は、+X:右 +Y:上 +Z:手前 になる。
-        bo = v3d.Create2DObject(bNormal:=True, bTexture:=True, bColor:=False)
-        With bo
+        boFramerate = v3d.Create2DObject(bNormal:=True, bTexture:=True, bColor:=False)
+        With boFramerate
+            Const w = 25
+            Const h = 12
             '画面右上に寄せたいので右上を原点にする
             .AddTriangle(
-                New Vector3(-10, 0, 0), New Vector2(0, 0),
+                New Vector3(-w, 0, 0), New Vector2(0, 0),
                 New Vector3(0, 0, 0), New Vector2(1, 0),
-                New Vector3(0, -5, 0), New Vector2(1, 1))
+                New Vector3(0, -h, 0), New Vector2(1, 1))
             .AddTriangle(
-                New Vector3(-10, 0, 0), New Vector2(0, 0),
-                New Vector3(0, -5, 0), New Vector2(1, 1),
-                New Vector3(-10, -5, 0), New Vector2(0, 1))
+                New Vector3(-w, 0, 0), New Vector2(0, 0),
+                New Vector3(0, -h, 0), New Vector2(1, 1),
+                New Vector3(-w, -h, 0), New Vector2(0, 1))
             .Generate()
             .Lighting = False
             .Blend = True                   'テクスチャを半透明で描く
             .Texture = framerateTexture     'テクスチャを関連付け
-
-            '画面右上に寄せたいので、表示範囲の座標を取得
-            Dim rc As RectangleF = v3d.GetVisibleEdgeFor2D(20.0F) 'z=0では少し小さいので、手前(20)に寄せる
-            .Martices(0) = Matrix4.CreateTranslation(rc.Right, rc.Top, 20.0F)
+            '画面右上に位置を設定
+            SetFrameratePosition()
         End With
 
 
@@ -146,6 +155,7 @@ Public Class Form1
                 New Vector3(10, -5, 0), Color4.Green)
             .Generate()
             .Culling = False '裏面も表示
+            .Lighting = False '頂点色を使いたいのでライティングをOFFにする
         End With
 
         'サイコロを描く
@@ -197,6 +207,12 @@ Public Class Form1
 
     End Sub
 
+    'ビューポートが変更されたときに呼び出されます
+    Private Sub v3d_ViewportResized(sender As View3D)
+        'フレームレートポリゴンの位置を再設定
+        SetFrameratePosition()
+    End Sub
+
     'フレームレートのタイミングで時間的な更新のために呼び出される
     Private Sub v3d_Tick(sender As View3D, elapsedMilliseconds As Long)
 
@@ -226,11 +242,20 @@ Public Class Form1
         If elapsedMillis >= 1000 Then
             '1秒経過した
             elapsedMillis -= 1000
-            drawFramerateToTexture()
+            DrawFramerateToTexture()
         End If
     End Sub
 
-    Private Sub drawFramerateToTexture()
+
+    Private Sub SetFrameratePosition()
+
+        '画面右上に寄せたいので、表示範囲の座標を取得
+        Dim rc As RectangleF = v3d.GetVisibleEdgeFor2D(0.0F) 'z=0での表示範囲を得る
+        boFramerate.Martices(0) = Matrix4.CreateTranslation(rc.Right, rc.Top, 0.0F) 'ポリゴンを右上に寄せる
+    End Sub
+
+
+    Private Sub DrawFramerateToTexture()
 
         'テクスチャにフレームレートを書き込む
         Dim g As Drawing.Graphics = Drawing.Graphics.FromImage(framerateTexture)
@@ -239,7 +264,7 @@ Public Class Form1
         g.FillRectangle(brush, 0, 0, framerateTexture.Width, framerateTexture.Height)
         brush.Dispose()
         g.CompositingMode = Drawing2D.CompositingMode.SourceOver                        '通常モードに戻す
-        g.DrawString(v3d.FPS.ToString("F2"), Me.Font, Brushes.Yellow, New Point(0, 0))  'テキストを描画
+        g.DrawString(v3d.FPS.ToString("F2"), textureFont, Brushes.Yellow, New Point(0, 0))  'テキストを描画
         g.Dispose()
 
         '更新したテクスチャを反映させる(登録または更新)
