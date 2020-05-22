@@ -5,6 +5,12 @@ VisualStudioVersion = 16.0.30104.148
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "EasyOpenGL", "EasyOpenGL\EasyOpenGL.vbproj", "{C0BDB6C8-98B7-43C2-AD5D-3DBAC70F16EC}"
 EndProject
+Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "Tutorial1_Empty", "Tutorial1_Empty\Tutorial1_Empty.vbproj", "{023DC716-D017-4556-919F-6572C82E0AD0}"
+EndProject
+Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "Tutorial2_RotationTriangle", "Tutorial2_RotationTriangle\Tutorial2_RotationTriangle.vbproj", "{99684F65-45F9-4A32-A9C1-27AAE5FA04FA}"
+EndProject
+Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "Tutorial3_Coordinates", "Tutorial3_Coordinates\Tutorial3_Coordinates.vbproj", "{6E6BFDF5-39D1-4D90-A67B-5F151EE2A96D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +21,18 @@ Global
 		{C0BDB6C8-98B7-43C2-AD5D-3DBAC70F16EC}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C0BDB6C8-98B7-43C2-AD5D-3DBAC70F16EC}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C0BDB6C8-98B7-43C2-AD5D-3DBAC70F16EC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{023DC716-D017-4556-919F-6572C82E0AD0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{023DC716-D017-4556-919F-6572C82E0AD0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{023DC716-D017-4556-919F-6572C82E0AD0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{023DC716-D017-4556-919F-6572C82E0AD0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{99684F65-45F9-4A32-A9C1-27AAE5FA04FA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{99684F65-45F9-4A32-A9C1-27AAE5FA04FA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{99684F65-45F9-4A32-A9C1-27AAE5FA04FA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{99684F65-45F9-4A32-A9C1-27AAE5FA04FA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6E6BFDF5-39D1-4D90-A67B-5F151EE2A96D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6E6BFDF5-39D1-4D90-A67B-5F151EE2A96D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6E6BFDF5-39D1-4D90-A67B-5F151EE2A96D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6E6BFDF5-39D1-4D90-A67B-5F151EE2A96D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

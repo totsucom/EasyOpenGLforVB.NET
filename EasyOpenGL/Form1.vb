@@ -1,6 +1,5 @@
 ﻿Imports OpenTK
 Imports OpenTK.Graphics
-Imports OpenTK.Graphics.ES11
 
 Public Class Form1
 
@@ -13,7 +12,7 @@ Public Class Form1
 
     'サンプルのサイコロオブジェクト
     '回転させるために、変数を宣言
-    Private boDice As View3D.BufferObject
+    'Private boDice As View3D.BufferObject
 
     'フレームレートを表示するためのテクスチャ
     'このテクスチャは１秒毎に更新するため、変数を宣言
@@ -102,7 +101,7 @@ Public Class Form1
             g.Dispose()
 
             '作成したテクスチャを登録する
-            v3d.SetTexture(texture)
+            v3d.AddTexture(texture)
 
             '座標軸のアルファベット表示するためのポイントを準備
             bo = v3d.CreateProintSprite(bTexture:=True, bColor:=False)
@@ -119,6 +118,7 @@ Public Class Form1
 
         'FPS表示用のテクスチャを準備
         framerateTexture = New Bitmap(100, 48)   'テクスチャを作成
+        v3d.AddTexture(framerateTexture)
         DrawFramerateToTexture()                'テクスチャに描画＆登録
 
         'フレームレートテクスチャを貼り付けるポリゴンを2Dで作成する
@@ -160,9 +160,9 @@ Public Class Form1
 
         'サイコロを描く
         texture = New Bitmap("..\..\dice.jpg")
-        v3d.SetTexture(texture)
-        boDice = v3d.Create3DObject(bNormal:=True, bTexture:=True, bColor:=False)
-        With boDice
+        v3d.AddTexture(texture, "dice")
+        bo = v3d.Create3DObject(bNormal:=True, bTexture:=True, bColor:=False, "dice") '名前はテクスチャと同じにする必要は無い。管理が違うので同じでも可
+        With bo
             Const div = 10 '点光源を平面に当てる場合は、ポリゴンを分割しないとうまく表示されないので、divに1以上を設定して、AddQuad内で分割作成してもらう
             .AddQuad('上面
                 New Vector3(-1, 1, -1), New Vector2(0, 0),
@@ -215,6 +215,7 @@ Public Class Form1
 
     'フレームレートのタイミングで時間的な更新のために呼び出される
     Private Sub v3d_Tick(sender As View3D, elapsedMilliseconds As Long)
+        Dim bo As View3D.BufferObject
 
         '色付き三角形を回転させる
         With boColorTriangle
@@ -225,16 +226,17 @@ Public Class Form1
         End With
 
         '二つ目のサイコロを回転させる
-        With boDice
+        bo = v3d.GetBufferObject("dice") 'BufferObjectは変数で保持してもよいし、このように名前で探すこともできる
+        If bo IsNot Nothing AndAlso bo.Martices.Count >= 2 Then
             Static angDX As Single = 0.0F
             Static angDY As Single = 0.0F
             angDX += MathHelper.Pi * elapsedMilliseconds / 1000.0F / 6.0F '1秒で30度回転
             angDY += MathHelper.Pi * elapsedMilliseconds / 1000.0F / 9.0F '1秒で20度回転
-            .Martices(1) = Matrix4.CreateRotationX(angDX)
-            .Martices(1) *= Matrix4.CreateRotationY(angDY)
-            .Martices(1) *= Matrix4.CreateScale(5.0F)
-            .Martices(1) *= Matrix4.CreateTranslation(-30.0F, 0.0F, 0.0F) '5倍拡大、左に移動
-        End With
+            bo.Martices(1) = Matrix4.CreateRotationX(angDX)
+            bo.Martices(1) *= Matrix4.CreateRotationY(angDY)
+            bo.Martices(1) *= Matrix4.CreateScale(5.0F)
+            bo.Martices(1) *= Matrix4.CreateTranslation(-30.0F, 0.0F, 0.0F) '5倍拡大、左に移動
+        End If
 
         'フレームレートを表示するテクスチャを更新する
         Static elapsedMillis As Long = 0
@@ -254,7 +256,6 @@ Public Class Form1
         boFramerate.Martices(0) = Matrix4.CreateTranslation(rc.Right, rc.Top, 0.0F) 'ポリゴンを右上に寄せる
     End Sub
 
-
     Private Sub DrawFramerateToTexture()
 
         'テクスチャにフレームレートを書き込む
@@ -268,7 +269,75 @@ Public Class Form1
         g.Dispose()
 
         '更新したテクスチャを反映させる(登録または更新)
-        v3d.SetTexture(framerateTexture)
+        v3d.UpdateTexture(framerateTexture)
     End Sub
 
+    Private Sub ButtonSave_Click(sender As Object, e As EventArgs) Handles ButtonSave.Click
+
+        '１つのサイコロオブジェクトを保存（配列で渡せるので、複数のオブジェクトを１つのファイルに保存できる）
+        Dim bo As View3D.BufferObject = v3d.GetBufferObject("dice")
+        If bo IsNot Nothing Then
+            Dim fileList As New List(Of String)
+
+            If View3D.BufferObject.SaveToXml({bo}, "Objects.xml", True, "", "Texture", fileList) Then
+                Dim s As String = "保存しました"
+                For Each path As String In fileList
+                    s &= vbNewLine
+                    s &= path
+                Next
+                MsgBox(s)
+            Else
+                MsgBox("保存できませんでした")
+            End If
+        Else
+            MsgBox("サイコロオブジェクトがありません")
+        End If
+    End Sub
+
+    Private Sub ButtonLoad_Click(sender As Object, e As EventArgs) Handles ButtonLoad.Click
+        Dim arBO As New List(Of View3D.BufferObject)
+        Dim arTI As New List(Of View3D.TextureInfo)
+
+        If View3D.BufferObject.LoadFromXml("Objects.xml", arBO, True, "", arTI) Then
+            MsgBox(String.Format("{0}個のオブジェクトと{1}個のテクスチャを読み込みました", arBO.Count, arTI.Count))
+
+            For Each bo As View3D.BufferObject In arBO
+
+
+                Debug.Print("Name of loaded buffer object: " & bo.GetName)
+
+                v3d.AddBufferObject(bo)
+                bo.Generate()
+            Next
+
+            For Each ti As View3D.TextureInfo In arTI
+                v3d.AddTexture(ti.bmp, ti.name)
+            Next
+
+        Else
+            MsgBox("読み込みに失敗しました")
+        End If
+    End Sub
+
+    Private Sub ButtonDelete_Click(sender As Object, e As EventArgs) Handles ButtonDelete.Click
+        If v3d.GetBufferObject("dice") IsNot Nothing Then
+            'サイコロオブジェクトのテクスチャを削除
+            v3d.DeleteTexture("dice")
+
+            'サイコロオブジェクトを削除
+            v3d.DeleteBufferObject("dice")
+
+            MsgBox("サイコロオブジェクトを削除しました")
+        Else
+            MsgBox("サイコロオブジェクトはありません")
+        End If
+    End Sub
+
+    Private Sub Button1_Click(sender As Object, e As EventArgs) Handles Button1.Click
+        v3d.SaveToXml("Env.xml", bView:=True, bCamera:=True, bLight:=True, bOthers:=True)
+    End Sub
+
+    Private Sub Button2_Click(sender As Object, e As EventArgs) Handles Button2.Click
+        v3d.LoadFromXml("Env.xml", bView:=True, bCamera:=True, bLight:=True, bOthers:=True)
+    End Sub
 End Class

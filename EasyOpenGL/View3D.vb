@@ -1,4 +1,5 @@
-﻿Imports OpenTK
+﻿Imports System.Xml
+Imports OpenTK
 Imports OpenTK.Graphics
 Imports OpenTK.Graphics.OpenGL
 
@@ -6,9 +7,33 @@ Public Class View3D
     Inherits OpenTK.GLControl
 
     'イベント
-    Public Event LoadModel(sender As View3D)                    '３D初期化後にユーザー側の初期化処理のために呼ばれる
-    Public Event ViewportResized(sender As View3D)              'ウィンドウがリサイズされ、ビューポートが再設定されたときに呼ばれる（LoadModelのタイミングでは呼ばない）
-    Public Event Tick(sender As View3D, milliSeconds As Long)   'フレーム描画毎に呼ばれる
+
+    ''' <summary>
+    ''' View3D初期化後にユーザー側の初期化処理のために呼ばれます
+    ''' これはフォームアプリの起動時ではなく、View3Dが表示されるタイミングで実行されます。
+    ''' 例えばタブコントロールの初期状態で非表示のタブに配置した場合、タブが選択されて、表示されるときに呼ばれます。
+    ''' 一般にこのイベントで照明、カメラの設定やモデルのロードを行いますが、必ずやらなければならないものはありません。
+    ''' 初期化が行われたかどうかを知るには View3D.Loadedプロパティを参照します
+    ''' </summary>
+    ''' <param name="sender"></param>
+    Public Event LoadModel(sender As View3D)
+
+    ''' <summary>
+    ''' ウィンドウサイズが変わったときなど、ビューポートが再設定されたときに呼び出されます。
+    ''' ビューポートが変化すると、GetVisibleEdgeFor2D()の返す値も変化するため、必要に応じて再計算してください。
+    ''' このイベントはフォームアプリの起動時には発生しません。また、View3Dの初期化前にも発生しません。
+    ''' </summary>
+    ''' <param name="sender"></param>
+    Public Event ViewportResized(sender As View3D)
+
+    ''' <summary>
+    ''' フレーム描画毎に呼ばれます。一般に時間に応じて行う処理を記述しますが、その内容は特に決まっていません。
+    ''' milliSecondsに前回の呼び出しからの経過時間(ミリ秒)が格納されているので、一般にこの値を用いてオブジェクトの移動や回転処理を行います。
+    ''' </summary>
+    ''' <param name="sender"></param>
+    ''' <param name="milliSeconds"></param>
+    Public Event Tick(sender As View3D, milliSeconds As Long)
+
 
     '3D関連
     Private projection As Matrix4                       '視野
@@ -31,9 +56,20 @@ Public Class View3D
     Private arBO As New List(Of BufferObject)
 
     'テクスチャを管理
-    Private Class TextureInfo
-        Public bmp As Bitmap = Nothing
-        Public txt As Integer = 0       'バッファID
+    Public Class TextureInfo
+        Friend bmp As Bitmap = Nothing
+        Friend name As String
+        Friend txt As Integer = 0       'バッファID
+        Public ReadOnly Property GetBitmap As Bitmap
+            Get
+                Return bmp
+            End Get
+        End Property
+        Public ReadOnly Property GetName As String
+            Get
+                Return name
+            End Get
+        End Property
     End Class
     Private arTxt As New List(Of TextureInfo)
 
@@ -349,7 +385,9 @@ Public Class View3D
                         Dim setTexture As Boolean = False
                         If ._bTexture Then
                             For Each ti As TextureInfo In arTxt
-                                If ti.bmp Is .Texture Then
+                                If (.Texture IsNot Nothing AndAlso ti.bmp Is .Texture) OrElse
+                                   (.TextureName <> "" AndAlso ti.name = .TextureName) Then
+
                                     GL.BindTexture(TextureTarget.Texture2D, ti.txt)
                                     setTexture = True
                                     Exit For
@@ -431,10 +469,16 @@ Public Class View3D
     ''' <summary>
     ''' カメラの位置（視点）を変更する
     ''' position: カメラの移動方向（上下左右ではなく、絶対軸方向）
+    ''' relative: Trueで現在座標に加算、Falseで現在座標に置き換える
     ''' </summary>
     ''' <param name="position"></param>
-    Public Sub MoveCameraXYZ(position As Vector3)
-        cameraPosition += position '現在位置に加算
+    ''' <param name="relative"></param>
+    Public Sub MoveCameraXYZ(position As Vector3, relative As Boolean)
+        If relative Then
+            cameraPosition += position  '現在位置に加算
+        Else
+            cameraPosition = position   '現在位置を置換
+        End If
 
         '行列を再計算
         cameraMatrix = Matrix4.CreateTranslation(cameraPosition)
@@ -446,13 +490,21 @@ Public Class View3D
     ''' カメラの向き（視線）を変更する
     ''' horizAngle: 水平方向の角度
     ''' vertAngle: 上下方向の角度
+    ''' relative: Trueで現在角度に加算、Falseで現在角度に置き換える
     ''' </summary>
     ''' <param name="horizAngle"></param>
     ''' <param name="vertAngle"></param>
-    Public Sub TurnCamera(horizAngle As Single, vertAngle As Single)
-        'カメラの向きに角度を追加
-        cameraHorizAngle += horizAngle
-        cameraVertAngle += vertAngle
+    ''' <param name="relative"></param>
+    Public Sub TurnCamera(horizAngle As Single, vertAngle As Single, relative As Boolean)
+        If relative Then
+            '角度を追加
+            cameraHorizAngle += horizAngle
+            cameraVertAngle += vertAngle
+        Else
+            '角度を追加
+            cameraHorizAngle = horizAngle
+            cameraVertAngle = vertAngle
+        End If
 
         '行列を再計算
         cameraMatrix = Matrix4.CreateTranslation(cameraPosition)
@@ -484,33 +536,12 @@ Public Class View3D
     Private Sub glControl_MouseMove(sender As Object, e As MouseEventArgs)
         If e.Button = MouseButtons.Right Then
             '視線移動
-            TurnCamera(CSng(e.X - mousePos.X) / CSng(Me.Width) * 2 * Math.PI, CSng(e.Y - mousePos.Y) / CSng(Me.Height) * 2 * Math.PI)
-
-            'modelHorizAngle += CSng(e.X - mousePos.X) / CSng(sender.Width) * 2 * Math.PI
-            'modelVertAngle += CSng(e.Y - mousePos.Y) / CSng(sender.height) * 2 * Math.PI
-
-            'eyeMatrix = Matrix4.CreateTranslation(eyePosition)
-            'eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitY, modelHorizAngle)
-            'eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitX, modelVertAngle)
-
+            TurnCamera(CSng(e.X - mousePos.X) / CSng(Me.Width) * 2 * Math.PI,
+                CSng(e.Y - mousePos.Y) / CSng(Me.Height) * 2 * Math.PI, True)
             mousePos = New Point(e.X, e.Y)
         ElseIf e.Button = MouseButtons.Left Then
             '視点移動
             MoveCamera(New Vector3(CSng(e.X - mousePos.X) * 0.005F * cameraDistance, -CSng(e.Y - mousePos.Y) * 0.005F * cameraDistance, 0.0F))
-            'Dim m As Matrix4 = Matrix4.CreateFromAxisAngle(Vector3.UnitX, -modelVertAngle)
-            'm = m * Matrix4.CreateFromAxisAngle(Vector3.UnitY, -modelHorizAngle)
-
-            'Dim dx As Single = CSng(e.X - mousePos.X) * 0.005F * eyeDistance
-            'Dim dy As Single = -CSng(e.Y - mousePos.Y) * 0.005F * eyeDistance
-            'm = Matrix4.CreateTranslation(dx, dy, 0) * m
-
-            'eyePosition += m.ExtractTranslation()
-
-
-            'eyeMatrix = Matrix4.CreateTranslation(eyePosition)
-            'eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitY, modelHorizAngle)
-            'eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitX, modelVertAngle)
-
             mousePos = New Point(e.X, e.Y)
         End If
     End Sub
@@ -525,7 +556,7 @@ Public Class View3D
         m = m * Matrix4.CreateFromAxisAngle(Vector3.UnitY, -cameraHorizAngle - xang)
         m = Matrix4.CreateTranslation(0.0F, 0.0F, e.Delta / 10.0F) * m
 
-        MoveCameraXYZ(m.ExtractTranslation())
+        MoveCameraXYZ(m.ExtractTranslation(), relative:=True)
 
         'eyePosition += m.ExtractTranslation()
 
@@ -534,6 +565,48 @@ Public Class View3D
         'eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitY, modelHorizAngle)
         'eyeMatrix = eyeMatrix * Matrix4.CreateFromAxisAngle(Vector3.UnitX, modelVertAngle)
     End Sub
+
+    ''' <summary>
+    ''' 登録されているBufferObjectの一覧を取得する
+    ''' </summary>
+    ''' <returns></returns>
+    Public Function GetBufferObjects() As BufferObject()
+        Return arBO.ToArray()
+    End Function
+
+    ''' <summary>
+    ''' 名前からBufferObjectを取得する
+    ''' </summary>
+    ''' <param name="name"></param>
+    ''' <returns></returns>
+    Public Function GetBufferObject(name As String) As BufferObject
+        For Each bo As BufferObject In arBO
+            If bo.GetName = name Then Return bo
+        Next
+        Return Nothing
+    End Function
+
+    ''' <summary>
+    ''' 登録されているテクスチャの一覧を取得する
+    ''' </summary>
+    ''' <returns></returns>
+    Public Function GetTextures() As TextureInfo()
+        Return arTxt.ToArray()
+    End Function
+
+    ''' <summary>
+    ''' 名前からテクスチャビットマップを取得する
+    ''' </summary>
+    ''' <param name="name"></param>
+    ''' <returns></returns>
+    Public Function GetTexture(name As String) As Bitmap
+        Dim ti As TextureInfo
+        For i As Integer = 0 To arTxt.Count - 1
+            ti = arTxt(i)
+            If ti.name = name Then Return ti.bmp
+        Next
+        Return Nothing
+    End Function
 
     ''' <summary>
     ''' バッファオブジェクトによって割り当てられた頂点バッファなどを解放し、
@@ -563,13 +636,28 @@ Public Class View3D
 
         '管理配列から削除する
         arBO.Remove(bo)
+        bo._parent = Nothing
         Return True
+    End Function
+
+    ''' <summary>
+    ''' バッファオブジェクトによって割り当てられた頂点バッファなどを解放し、
+    ''' 管理用配列からバッファオブジェクトを除外します。
+    ''' テクスチャは別途破棄する必要があります。
+    ''' アプリケーションの終了時にわざわざ呼び出す必要はありません。
+    ''' </summary>
+    ''' <param name="name"></param>
+    ''' <returns></returns>
+    Public Function DeleteBufferObject(name As String) As Boolean
+        Dim bo As BufferObject = GetBufferObject(name)
+        If bo Is Nothing Then Return False
+        Return DeleteBufferObject(bo)
     End Function
 
     ''' <summary>
     ''' SetTexture()によって割り当てられたテクスチャバッファを削除し、
     ''' 管理用配列からも除外します。
-    ''' bmpにはSetTexture()呼び出し時に使用したビットマップを渡します。
+    ''' bmpにはAddTexture()呼び出し時に使用したビットマップを渡します。
     ''' アプリケーションの終了時にわざわざ呼び出す必要はありません。
     ''' </summary>
     ''' <param name="bmp"></param>
@@ -591,54 +679,47 @@ Public Class View3D
 
     ''' <summary>
     ''' SetTexture()によって割り当てられたテクスチャバッファを削除し、管理用配列からも除外します。
-    ''' txtにはSetTexture()呼び出し時に返された、テクスチャバッファIDを渡します。
+    ''' bmpにはAddTexture()呼び出し時に設定した名前を渡します。
     ''' アプリケーションの終了時にわざわざ呼び出す必要はありません。
     ''' </summary>
-    ''' <param name="txt"></param>
+    ''' <param name="name"></param>
     ''' <returns></returns>
-    Public Function DeleteTexture(txt As Integer) As Boolean
-        If txt > 0 Then
-            For i As Integer = 0 To arTxt.Count - 1
-                Dim ti As TextureInfo = arTxt(i)
-                If ti.txt = txt Then
-                    GL.DeleteTexture(txt)
-                    arTxt.RemoveAt(i)
-                    Return True
-                End If
-            Next
-        End If
+    Public Function DeleteTexture(name As String) As Boolean
+        For i As Integer = 0 To arTxt.Count - 1
+            Dim ti As TextureInfo = arTxt(i)
+            If ti.name <> "" AndAlso ti.name = name Then
+                GL.DeleteTexture(ti.txt)
+                arTxt.RemoveAt(i)
+                Return True
+            End If
+        Next
         Return False
     End Function
 
     ''' <summary>
-    ''' ビットマップをテクスチャバッファに登録または更新し、そのバッファIDを返します。
-    ''' ビットマップが既に登録されたものであれば、テクスチャバッファを解放後、再度イメージをロードします。
-    ''' 関数はいずれの場合もバッファIDを返します。
+    ''' ビットマップをテクスチャバッファに追加します。
+    ''' テクスチャに名前をつけることができます。名前に使える文字はファイル名に使える文字のみです。
+    ''' テクスチャへの参照方法はビットマップまたは名前を使うことができます。
+    ''' ビットマップや、設定した名前が重複していた場合、もしくは名前に不適正な文字があった場合はFalseを返して追加されません。
     ''' </summary>
     ''' <param name="bmp"></param>
-    ''' <returns></returns>
-    Public Function SetTexture(bmp As Bitmap) As Integer
-        Dim newTexture As Boolean = True
-        Dim ti As TextureInfo = Nothing
+    ''' <param name="name"></param>
+    ''' <return></return>
+    Public Function AddTexture(bmp As Bitmap, Optional name As String = "") As Boolean
+        If name.IndexOfAny(IO.Path.GetInvalidFileNameChars()) >= 0 Then Return False
 
-        '同じイメージがテクスチャとして使われていたら削除する
+        Dim newTexture As Boolean = True
+
         For i As Integer = 0 To arTxt.Count - 1
-            ti = arTxt(i)
-            If ti.bmp Is bmp Then
-                If ti.txt > 0 Then
-                    GL.DeleteTexture(ti.txt)
-                    ti.txt = 0
-                End If
-                newTexture = False
-                Exit For
-            End If
+            With arTxt(i)
+                If .bmp Is bmp Then Return False 'ビットマップが重複
+                If .name <> "" AndAlso name <> "" AndAlso .name = name Then Return False '名前が重複
+            End With
         Next
 
-        '新しいテクスチャの場合
-        If newTexture Then
-            ti = New TextureInfo
-            ti.bmp = bmp
-        End If
+        Dim ti As New TextureInfo
+        ti.bmp = bmp
+        ti.name = name
 
         'Textureの許可
         GL.Enable(EnableCap.Texture2D)
@@ -664,7 +745,76 @@ Public Class View3D
 
         'テクスチャ管理配列に追加
         If newTexture Then arTxt.Add(ti)
-        Return ti.txt
+        Return True
+    End Function
+
+    Friend Function FindTexture(bmp As Bitmap) As TextureInfo
+        Dim ti As TextureInfo
+        For i As Integer = 0 To arTxt.Count - 1
+            ti = arTxt(i)
+            If ti.bmp Is bmp Then Return ti
+        Next
+        Return Nothing
+    End Function
+
+    Friend Function FindTexture(name As String) As TextureInfo
+        Dim ti As TextureInfo
+        For i As Integer = 0 To arTxt.Count - 1
+            ti = arTxt(i)
+            If ti.name = name Then Return ti
+        Next
+        Return Nothing
+    End Function
+
+    ''' <summary>
+    ''' 登録済みのテクスチャを更新します
+    ''' 名前で指定する場合はnameパラメータを設定してください
+    ''' テクスチャが見つからない場合はFalseを返し更新されません
+    ''' </summary>
+    ''' <param name="bmp"></param>
+    ''' <param name="name"></param>
+    ''' <returns></returns>
+    Public Function UpdateTexture(bmp As Bitmap, Optional name As String = "") As Boolean
+        Dim found As Boolean = False
+        Dim ti As TextureInfo = Nothing
+
+        For i As Integer = 0 To arTxt.Count - 1
+            ti = arTxt(i)
+            If (name = "" AndAlso ti.bmp Is bmp) OrElse (name <> "" AndAlso ti.name = name) Then
+                If ti.txt > 0 Then
+                    GL.DeleteTexture(ti.txt)
+                    ti.txt = 0
+                End If
+                found = True
+                Exit For
+            End If
+        Next
+
+        If Not found Then Return False '見つからない
+
+        'Textureの許可
+        GL.Enable(EnableCap.Texture2D)
+
+        'テクスチャ用バッファの生成
+        ti.txt = GL.GenTexture()
+
+        'テクスチャ用バッファのひもづけ
+        GL.BindTexture(TextureTarget.Texture2D, ti.txt)
+
+        'テクスチャの設定
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, TextureMinFilter.Nearest)
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, TextureMagFilter.Nearest)
+
+        'データ読み込み
+        Dim Data As Imaging.BitmapData = bmp.LockBits(New Rectangle(0, 0, bmp.Width, bmp.Height), Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb)
+
+        'テクスチャ用バッファに色情報を流し込む
+        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, Data.Width, Data.Height, 0, OpenTK.Graphics.OpenGL.PixelFormat.Bgra, PixelType.UnsignedByte, Data.Scan0)
+
+        bmp.UnlockBits(Data)
+        GL.BindTexture(TextureTarget.Texture2D, 0)
+
+        Return True
     End Function
 
     ''' <summary>
@@ -695,8 +845,9 @@ Public Class View3D
     ''' <param name="bTexture"></param>
     ''' <param name="bColor"></param>
     ''' <returns></returns>
-    Public Function Create3DObject(bNormal As Boolean, bTexture As Boolean, bColor As Boolean) As BufferObject
-        arBO.Add(New BufferObject(Me, True, bNormal, bTexture, bColor, False))
+    Public Function Create3DObject(bNormal As Boolean, bTexture As Boolean, bColor As Boolean, Optional name As String = "") As BufferObject
+        If name.IndexOfAny(IO.Path.GetInvalidFileNameChars()) >= 0 Then Return Nothing
+        arBO.Add(New BufferObject(Me, True, bNormal, bTexture, bColor, False, name))
         Return arBO.Last
     End Function
 
@@ -713,8 +864,9 @@ Public Class View3D
     ''' <param name="bTexture"></param>
     ''' <param name="bColor"></param>
     ''' <returns></returns>
-    Public Function Create2DObject(bNormal As Boolean, bTexture As Boolean, bColor As Boolean) As BufferObject
-        arBO.Add(New BufferObject(Me, False, bNormal, bTexture, bColor, False))
+    Public Function Create2DObject(bNormal As Boolean, bTexture As Boolean, bColor As Boolean, Optional name As String = "") As BufferObject
+        If name.IndexOfAny(IO.Path.GetInvalidFileNameChars()) >= 0 Then Return Nothing
+        arBO.Add(New BufferObject(Me, False, bNormal, bTexture, bColor, False, name))
         Return arBO.Last
     End Function
 
@@ -730,10 +882,303 @@ Public Class View3D
     ''' <param name="bTexture"></param>
     ''' <param name="bColor"></param>
     ''' <returns></returns>
-    Public Function CreateProintSprite(bTexture As Boolean, bColor As Boolean) As BufferObject
-        arBO.Add(New BufferObject(Me, True, False, bTexture, bColor, True))
+    Public Function CreateProintSprite(bTexture As Boolean, bColor As Boolean, Optional name As String = "") As BufferObject
+        If name.IndexOfAny(IO.Path.GetInvalidFileNameChars()) >= 0 Then Return Nothing
+        arBO.Add(New BufferObject(Me, True, False, bTexture, bColor, True, name))
         Return arBO.Last
     End Function
+
+    ''' <summary>
+    ''' DeleteBufferObjectで削除されたBufferObjectを再登録する場合に使います
+    ''' 既に登録されている場合はFalseを返します
+    ''' </summary>
+    ''' <param name="bo"></param>
+    ''' <returns></returns>
+    Public Function AddBufferObject(bo As BufferObject) As Boolean
+        If arBO.IndexOf(bo) >= 0 Then Return False '登録済み
+        arBO.Add(bo)
+        bo._parent = Me
+        Return True
+    End Function
+
+
+    'XML出力用の補助クラス
+    Friend Class XmlWriteNode
+        Public Name As String
+        Public Value As Object  'String または List(Of XmlNode)
+        Public Sub New(name As String, value As String)
+            Me.Name = name
+            Me.Value = value
+        End Sub
+        Public Sub New(name As String)
+            Me.Name = name
+            Me.Value = New List(Of XmlWriteNode)
+        End Sub
+        Public Sub Add(node As XmlWriteNode)
+            Me.Value.add(node)
+        End Sub
+        Public Sub Add(name As String, value As String)
+            Me.Value.add(New XmlWriteNode(name, value))
+        End Sub
+        Public Sub Write(xmlWtr As XmlTextWriter, Optional indentCount As Integer = 0)
+            If TypeOf Value Is String Then
+                If indentCount > 0 Then xmlWtr.WriteString(New String(" "c, indentCount * 4))
+                xmlWtr.WriteStartElement(Me.Name)
+                xmlWtr.WriteString(Value)
+                xmlWtr.WriteEndElement()
+                xmlWtr.WriteString(Chr(13) & Chr(10))
+            Else
+                If indentCount > 0 Then xmlWtr.WriteString(New String(" "c, indentCount * 4))
+                xmlWtr.WriteStartElement(Me.Name)
+                xmlWtr.WriteString(Chr(13) & Chr(10))
+                For Each node In Value
+                    node.Write(xmlWtr, indentCount + 1)
+                Next
+                If indentCount > 0 Then xmlWtr.WriteString(New String(" "c, indentCount * 4))
+                xmlWtr.WriteEndElement()
+                xmlWtr.WriteString(Chr(13) & Chr(10))
+            End If
+        End Sub
+    End Class
+
+
+    ''' <summary>
+    ''' ３D環境をXMLファイルに保存します。
+    ''' 保存する項目はパラメータで指定します
+    ''' </summary>
+    ''' <param name="filePath"></param>
+    ''' <param name="bView"></param>
+    ''' <param name="bCamera"></param>
+    ''' <param name="bLight"></param>
+    ''' <param name="bOthers"></param>
+    ''' <returns></returns>
+    Public Function SaveToXml(filePath As String, bView As Boolean, bCamera As Boolean, bLight As Boolean, bOthers As Boolean) As Boolean
+
+        Try
+            Dim xmlWtr As New XmlTextWriter(filePath, System.Text.Encoding.UTF8)
+
+            'XML宣言を出力
+            xmlWtr.WriteStartDocument()
+            xmlWtr.WriteStartElement("Environments")
+            xmlWtr.WriteString(Chr(13) & Chr(10))
+
+            Dim node As XmlWriteNode
+            If bView Then
+                node = New XmlWriteNode("View")
+                node.Add("viewingAngleV", viewingAngleV.ToString)
+                node.Add("zNear", zNear.ToString)
+                node.Add("zFar", zFar.ToString)
+                node.Write(xmlWtr, 1)
+            End If
+
+            If bCamera Then
+                node = New XmlWriteNode("Camera")
+                node.Add("cameraHorizAngle", cameraHorizAngle.ToString)
+                node.Add("cameraVertAngle", cameraVertAngle.ToString)
+                node.Add("cameraPosition", cameraPosition.ToString)
+                node.Add("cameraDistance", cameraDistance.ToString)
+                node.Write(xmlWtr, 1)
+            End If
+
+            If bLight Then
+                node = New XmlWriteNode("Lights")
+                For i As Integer = 0 To 3
+                    If _light(i) IsNot Nothing Then
+                        With _light(i)
+                            Dim nodeLight As New XmlWriteNode("Light")
+                            nodeLight.Add("Index", i.ToString)
+                            nodeLight.Add("Active", .Active.ToString)
+                            nodeLight.Add("Position", .Position.ToString)
+                            nodeLight.Add("Diffuse", .Diffuse.ToString)
+                            nodeLight.Add("Specular", .Specular.ToString)
+                            nodeLight.Add("Ambient", .Ambient.ToString)
+                            nodeLight.Add("FollowCamera", .FollowCamera.ToString)
+                            node.Add(nodeLight)
+                        End With
+                    End If
+                Next
+                node.Write(xmlWtr, 1)
+            End If
+
+            If bOthers Then
+                node = New XmlWriteNode("Others")
+                node.Add("_clearColor", _clearColor.ToString)
+                node.Add("_limitFrames", _limitFrames.ToString)
+                node.Write(xmlWtr, 1)
+            End If
+
+            xmlWtr.WriteEndElement()
+            xmlWtr.WriteEndDocument()
+            xmlWtr.Flush()
+            xmlWtr.Close()
+        Catch ex As Exception
+            Debug.Print("View3Dの環境保存に失敗しました")
+            Debug.Print(ex.Message)
+            Return False
+        End Try
+
+        Return True
+    End Function
+
+    '文字列"(a,b,c,d)"から配列{"a","b","c","d"}を得る
+    Friend Shared Function GetValuesInBrackets(s As String) As String()
+        Dim i As Integer = s.IndexOf("("c)
+        Dim j As Integer = s.IndexOf(")"c, i)
+        Return s.Substring(i + 1, j - i - 1).Split({","c})
+    End Function
+
+    '文字列からColor4に変換
+    '文字列の例 {(R, G, B, A) = (0.7, 0.7, 0.7, 1)}
+    Friend Shared Function ToColor4(s As String) As Color4
+        Dim ar = s.Split({"="c})
+        Dim arTag = GetValuesInBrackets(ar(0))
+        Dim arValue = GetValuesInBrackets(ar(1))
+        Dim c As New Color4
+        For i As Integer = 0 To UBound(arTag)
+            Select Case arTag(i).Trim
+                Case "R"c : c.R = Single.Parse(arValue(i))
+                Case "G"c : c.G = Single.Parse(arValue(i))
+                Case "B"c : c.B = Single.Parse(arValue(i))
+                Case "A"c : c.A = Single.Parse(arValue(i))
+            End Select
+        Next
+        Return c
+    End Function
+
+    '文字列からColor4に変換
+    '文字列の例 {(10, 0, 0, 0),(0, 10, 0, 0),(0, 0, 10, 0),(0, 0, 0, 1)}
+    Friend Shared Function ToMatrix4(s As String) As Matrix4
+        Dim ar = s.Split({",("}, StringSplitOptions.None)
+        Dim m As New Matrix4
+        For i As Integer = 0 To UBound(ar)
+            Dim ar2 = GetValuesInBrackets(IIf(i > 0, "(", "") & ar(i))
+            Select Case i
+                Case 0
+                    m.M11 = Single.Parse(ar2(0))
+                    m.M12 = Single.Parse(ar2(1))
+                    m.M13 = Single.Parse(ar2(2))
+                    m.M14 = Single.Parse(ar2(3))
+                Case 1
+                    m.M21 = Single.Parse(ar2(0))
+                    m.M22 = Single.Parse(ar2(1))
+                    m.M23 = Single.Parse(ar2(2))
+                    m.M24 = Single.Parse(ar2(3))
+                Case 2
+                    m.M31 = Single.Parse(ar2(0))
+                    m.M32 = Single.Parse(ar2(1))
+                    m.M33 = Single.Parse(ar2(2))
+                    m.M34 = Single.Parse(ar2(3))
+                Case 3
+                    m.M41 = Single.Parse(ar2(0))
+                    m.M42 = Single.Parse(ar2(1))
+                    m.M43 = Single.Parse(ar2(2))
+                    m.M44 = Single.Parse(ar2(3))
+            End Select
+        Next
+        Return m
+    End Function
+
+    '文字列からVector3に変換
+    '文字列の例 (1, 2, 3)
+    Friend Shared Function ToVector3(s As String) As Vector3
+        Dim ar = GetValuesInBrackets(s)
+        Dim v As New Vector3
+        v.x = Single.Parse(ar(0))
+        v.Y = Single.Parse(ar(1))
+        v.Z = Single.Parse(ar(2))
+        Return v
+    End Function
+
+    '文字列からVector4に変換
+    '文字列の例 (1, 2, 3, 4)
+    Friend Shared Function ToVector4(s As String) As Vector4
+        Dim ar = GetValuesInBrackets(s)
+        Dim v As New Vector4
+        v.X = Single.Parse(ar(0))
+        v.Y = Single.Parse(ar(1))
+        v.Z = Single.Parse(ar(2))
+        v.W = Single.Parse(ar(3))
+        Return v
+    End Function
+
+    ''' <summary>
+    ''' SaveToXml()で保存した３D環境を読み込みます。
+    ''' 読み込む項目はパラメータで指定します
+    ''' </summary>
+    ''' <param name="filePath"></param>
+    ''' <param name="bView"></param>
+    ''' <param name="bCamera"></param>
+    ''' <param name="bLight"></param>
+    ''' <param name="bOthers"></param>
+    ''' <returns></returns>
+    Public Function LoadFromXml(filePath As String, bView As Boolean, bCamera As Boolean, bLight As Boolean, bOthers As Boolean) As Boolean
+
+        Try
+            Dim xmlDoc As New XmlDocument()
+            xmlDoc.Load(filePath)
+
+            Dim Environments As XmlNode = xmlDoc.GetElementsByTagName("Environments").Item(0)
+            Dim n As XmlNode
+
+            If bView Then
+                n = Environments.SelectSingleNode("View")
+                If n IsNot Nothing Then
+                    viewingAngleV = Single.Parse(n.SelectSingleNode("viewingAngleV").InnerText)
+                    zNear = Single.Parse(n.SelectSingleNode("zNear").InnerText)
+                    zFar = Single.Parse(n.SelectSingleNode("zFar").InnerText)
+                    PrepareViewport()
+                End If
+            End If
+
+            If bCamera Then
+                n = Environments.SelectSingleNode("Camera")
+                If n IsNot Nothing Then
+                    Dim horizAngle As Single = Single.Parse(n.SelectSingleNode("cameraHorizAngle").InnerText)
+                    Dim vertAngle As Single = Single.Parse(n.SelectSingleNode("cameraVertAngle").InnerText)
+                    TurnCamera(horizAngle, vertAngle, False)
+
+                    Dim position As Vector3 = ToVector3(n.SelectSingleNode("cameraPosition").InnerText)
+                    MoveCameraXYZ(position, relative:=False)
+
+                    cameraDistance = Single.Parse(n.SelectSingleNode("cameraDistance").InnerText)
+                End If
+            End If
+
+            If bLight Then
+                n = Environments.SelectSingleNode("Lights")
+                If n IsNot Nothing Then
+                    For Each ln As XmlNode In n.SelectNodes("Light")
+                        Dim light As New Light
+                        Dim index As Integer = Integer.Parse(ln.SelectSingleNode("Index").InnerText)
+                        _light(index) = light
+                        light.Active = Boolean.Parse(ln.SelectSingleNode("Active").InnerText)
+                        light.Position = ToVector4(ln.SelectSingleNode("Position").InnerText)
+                        light.Diffuse = ToColor4(ln.SelectSingleNode("Diffuse").InnerText)
+                        light.Specular = ToColor4(ln.SelectSingleNode("Specular").InnerText)
+                        light.Ambient = ToColor4(ln.SelectSingleNode("Ambient").InnerText)
+                        light.FollowCamera = Boolean.Parse(ln.SelectSingleNode("FollowCamera").InnerText)
+                    Next
+                End If
+            End If
+
+            If bOthers Then
+                n = Environments.SelectSingleNode("Others")
+                If n IsNot Nothing Then
+                    _clearColor = ToColor4(n.SelectSingleNode("_clearColor").InnerText)
+                    _limitFrames = Single.Parse(n.SelectSingleNode("_limitFrames").InnerText)
+                End If
+            End If
+
+        Catch ex As Exception
+            Debug.Print("View3Dの環境読み込みに失敗しました")
+            Debug.Print(ex.Message)
+            Return False
+        End Try
+
+        Return True
+    End Function
+
+
 
     '光源を管理
     Public Class Light
@@ -1007,8 +1452,10 @@ Public Class View3D
         End Function
     End Class
 
+
     'View3Dで表示するオブジェクトを管理
     Public Class BufferObject
+        Private name As String
         Public Material As View3D.Material = Nothing 'マテリアル(質感)を設定できる
         Public Lighting As Boolean = True       'ライティングを行うか
         Public Culling As Boolean = True        '裏面を消去するか
@@ -1033,10 +1480,12 @@ Public Class View3D
         Private _ari As New List(Of Int32)      '頂点インデックスを格納
         Private _arb As New List(Of Byte)       '頂点データを格納
         Private _numVertex As Integer = 0       '頂点の数  
+
+        'テクスチャが設定された場合、下記のいずれかに値が入る（両方には入らない）
         Private _bmp As Bitmap = Nothing        'テクスチャ
+        Private _textureName As String = ""     'テクスチャ名
 
-
-        Private _parent As View3D               'このクラスを生成した親View3Dクラスへの参照を保持
+        Friend _parent As View3D               'このクラスを生成した親View3Dクラスへの参照を保持
 
         '頂点バッファ関連
         Friend _vbo As Integer = 0
@@ -1045,9 +1494,344 @@ Public Class View3D
         Friend _numIndex As Integer = 0
         Friend _bm As BeginMode
 
+        Private Class Txt
+            Public name As String = ""
+            Public bmp As Bitmap = Nothing
+            Public fileName As String = ""
+            Public Sub New(name As String, bmp As Bitmap, fileName As String)
+                Me.name = name
+                Me.bmp = bmp
+                Me.fileName = fileName
+            End Sub
+        End Class
+
         ''' <summary>
-        ''' テクスチャに使用するビットマップを取得または設定します
-        ''' 実際に使用するには、ビットマップはこのプロパティと、View3D.SetTexture()の両方で設定されていないといけません
+        ''' 複数のBufferObjectを１つの専用フォーマットファイル(XML形式)に保存します。
+        ''' saveTexture=Trueでテクスチャファイルも保存します。BMP形式でtextureDirectoryディレクトリに保存されます。
+        ''' テクスチャファイル名には"名前.bmp"で保存されますが、名前の無いテクスチャには"prefix001.bmp"形式で保存されます。
+        ''' 各ファイルは常に上書き保存するので注意してください。
+        ''' BufferObjectがView3Dクラスから削除されている場合は、テクスチャは保存されません。（検索できない）
+        ''' savedFileListを渡すと、保存されたファイルのフルパスの一覧が返されます。
+        ''' 成功したとき、関数はTrueを返します
+        ''' </summary>
+        ''' <param name="arBO"></param>
+        ''' <param name="filePath"></param>
+        ''' <param name="saveTexture"></param>
+        ''' <param name="textureDirectory"></param>
+        ''' <param name="prefix"></param>
+        ''' <param name="savedFileList"></param>
+        ''' <returns></returns>
+        Public Shared Function SaveToXml(arBO As BufferObject(), filePath As String,
+                                         saveTexture As Boolean, Optional textureDirectory As String = "",
+                                         Optional prefix As String = "T",
+                                         Optional savedFileList As List(Of String) = Nothing) As Boolean
+
+            Dim arTxt As List(Of Txt) = Nothing
+            If saveTexture Then
+                '使用中のテクスチャを調べる
+                arTxt = New List(Of Txt)
+                For Each bo As BufferObject In arBO
+                    If bo.TextureName = "" Then Continue For
+                    Dim found As Boolean = False
+                    For Each t As Txt In arTxt
+                        If t.name = bo.TextureName Then
+                            found = True
+                            Exit For
+                        End If
+                    Next
+                    If Not found AndAlso bo._parent IsNot Nothing Then
+                        Dim ti As TextureInfo = bo._parent.FindTexture(bo.TextureName)
+                        If ti IsNot Nothing Then
+                            arTxt.Add(New Txt(ti.name, ti.bmp, ti.name & ".bmp"))
+                        Else
+                            Debug.Print("BufferObjectがView3Dから切り離されているため、テクスチャを保存できません")
+                        End If
+                    End If
+                Next
+                Dim textureIndex As Integer = 1
+                For Each bo As BufferObject In arBO
+                    If bo.Texture Is Nothing Then Continue For
+                    Dim found As Boolean = False
+                    For Each t As Txt In arTxt
+                        If t.bmp Is bo.Texture Then
+                            found = True
+                            Exit For
+                        End If
+                    Next
+                    If Not found AndAlso bo._parent IsNot Nothing Then
+                        Dim ti As TextureInfo = bo._parent.FindTexture(bo.Texture)
+                        If ti IsNot Nothing Then
+                            Dim name As String = ti.name
+                            If name = "" Then
+                                name = prefix & textureIndex.ToString("D3")
+                                textureIndex += 1
+                            End If
+                            arTxt.Add(New Txt(name, ti.bmp, name & ".bmp"))
+                        Else
+                            Debug.Print("BufferObjectがView3Dから切り離されているため、テクスチャを保存できません")
+                        End If
+                    End If
+                Next
+                For Each t As Txt In arTxt
+                    Dim path As String = ""
+                    Try
+                        path = textureDirectory
+                        If path.Length > 0 AndAlso path.Last <> "\"c Then path &= "\"
+                        path &= t.fileName
+                        Dim tmp As New Bitmap(t.bmp)
+                        tmp.Save(path, Imaging.ImageFormat.Bmp)
+                        If savedFileList IsNot Nothing Then savedFileList.Add(System.IO.Path.GetFullPath(path))
+                    Catch ex As Exception
+                        Debug.Print("テクスチャの保存に失敗しました " & path)
+                        Debug.Print(ex.Message)
+                    End Try
+                Next
+            End If
+
+            Try
+                Dim xmlWtr As New XmlTextWriter(filePath, System.Text.Encoding.UTF8)
+
+                'XML宣言を出力
+                xmlWtr.WriteStartDocument()
+                xmlWtr.WriteStartElement("BufferObjects")
+                xmlWtr.WriteString(Chr(13) & Chr(10))
+
+                For Each bo As BufferObject In arBO
+
+                    Dim nodeBO As New XmlWriteNode("BufferObject")
+
+                    If bo.name <> "" Then nodeBO.Add("Name", bo.name)
+
+                    If bo.Material IsNot Nothing Then
+                        Dim nodeMaterial As New XmlWriteNode("Material")
+                        nodeBO.Add(nodeMaterial)
+                        nodeMaterial.Add("Specular", bo.Material.Specular.ToString)
+                        nodeMaterial.Add("Diffuse", bo.Material.Diffuse.ToString)
+                        nodeMaterial.Add("Ambient", bo.Material.Ambient.ToString)
+                        nodeMaterial.Add("Shininess", bo.Material.Shininess.ToString)
+                    End If
+
+                    nodeBO.Add("Lighting", bo.Lighting)
+                    nodeBO.Add("Culling", bo.Culling)
+                    nodeBO.Add("Blend", bo.Blend)
+                    nodeBO.Add("PointSize", bo.PointSize)
+                    nodeBO.Add("PointPerspective", bo.PointPerspective)
+                    nodeBO.Add("Active", bo.Active)
+
+                    For Each m As Matrix4 In bo.Martices
+                        nodeBO.Add("Martices", "{" & m.Row0.ToString & "," & m.Row1.ToString & "," & m.Row2.ToString & "," & m.Row3.ToString & "}")
+                    Next
+
+                    nodeBO.Add("_bXYZ", bo._bXYZ)
+                    nodeBO.Add("_bNormal", bo._bNormal)
+                    nodeBO.Add("_bTexture", bo._bTexture)
+                    nodeBO.Add("_bColor", bo._bColor)
+                    nodeBO.Add("_bPointSprite", bo._bPointSprite)
+                    nodeBO.Add("_primitive", bo._primitive) 'Points Lines Triangles
+
+                    Dim sb As New Text.StringBuilder
+                    sb.Append("{")
+                    For i As Integer = 0 To bo._ari.Count - 1
+                        If i > 0 Then sb.Append(",")
+                        sb.Append(bo._ari(i).ToString)
+                    Next
+                    sb.Append("}")
+                    nodeBO.Add("_ari", sb.ToString)
+
+                    sb.Clear()
+                    sb.Append("{")
+                    For i As Integer = 0 To bo._arb.Count - 1
+                        If i > 0 Then sb.Append(",")
+                        sb.Append("0x")
+                        sb.Append(bo._arb(i).ToString("X2"))
+                    Next
+                    sb.Append("}")
+                    nodeBO.Add("_arb", sb.ToString)
+                    nodeBO.Add("_numVertex", bo._numVertex)
+
+                    If bo.TextureName <> "" Then
+                        nodeBO.Add("TextureName", bo.TextureName)
+                        For Each t As Txt In arTxt
+                            If t.name = bo.TextureName Then
+                                nodeBO.Add("TextureFile", t.fileName)
+                                Exit For
+                            End If
+                        Next
+                    ElseIf bo.Texture IsNot Nothing Then
+                        For Each t As Txt In arTxt
+                            If t.bmp Is bo.Texture Then
+                                nodeBO.Add("TextureName", t.name)
+                                nodeBO.Add("TextureFile", t.fileName)
+                                Exit For
+                            End If
+                        Next
+                    End If
+
+                    nodeBO.Write(xmlWtr, 1)
+                Next
+
+                xmlWtr.WriteEndElement()
+                xmlWtr.WriteEndDocument()
+                xmlWtr.Flush()
+                xmlWtr.Close()
+
+                If savedFileList IsNot Nothing Then savedFileList.Add(System.IO.Path.GetFullPath(filePath))
+            Catch ex As Exception
+                Debug.Print("BufferObjectの保存に失敗しました")
+                Debug.Print(ex.Message)
+                Return False
+            End Try
+
+            Return True
+        End Function
+
+        '文字列の例 {n,n,n,n,....,n}
+        '"0x"形式の16進数に対応
+        Private Shared Function ToIntArray(ByRef s As String) As List(Of Integer)
+            Dim ar As New List(Of Integer)
+            Dim i As Integer = 1
+            Dim j As Integer
+            While s(i) <> "}"
+                If s(i) = "," Then i += 1
+                j = i + 1
+                While s(j) <> "," AndAlso s(j) <> "}"
+                    j += 1
+                End While
+                Dim w As String = s.Substring(i, j - i).Trim
+                If w.StartsWith("0x") Then
+                    ar.Add(Convert.ToInt32(w.Substring(2), 16))
+                Else
+                    ar.Add(Integer.Parse(w))
+                End If
+                i = j
+            End While
+            Return ar
+        End Function
+
+        '文字列の例 {n,n,n,n,....,n}
+        '"0x"形式の16進数に対応
+        Private Shared Function ToByteArray(ByRef s As String) As List(Of Byte)
+            Dim ar As New List(Of Byte)
+            Dim i As Integer = 1
+            Dim j As Integer
+            While s(i) <> "}"
+                If s(i) = "," Then i += 1
+                j = i + 1
+                While s(j) <> "," AndAlso s(j) <> "}"
+                    j += 1
+                End While
+                Dim w As String = s.Substring(i, j - i).Trim
+                If w.StartsWith("0x") Then
+                    ar.Add(Convert.ToByte(w.Substring(2), 16))
+                Else
+                    ar.Add(Byte.Parse(w))
+                End If
+                i = j
+            End While
+            Return ar
+        End Function
+
+        ''' <summary>
+        ''' SaveToXml()で保存したデータファイルを読み込みます。
+        ''' loadTexture=Trueでテクスチャファイルの読み込みも行います。
+        ''' 読み込まれたBufferObjectはloadedBufferObjectに、テクスチャはloadTextureListに格納されます。
+        ''' これらはView3D.AddBufferObject()とBufferObject.Generate()、View3D.AddTexture()で追加しないといけません
+        ''' </summary>
+        ''' <param name="filePath"></param>
+        ''' <param name="loadedBufferObject"></param>
+        ''' <param name="loadTexture"></param>
+        ''' <param name="textureDirectory"></param>
+        ''' <param name="loadTextureList"></param>
+        ''' <returns></returns>
+        Public Shared Function LoadFromXml(filePath As String, loadedBufferObject As List(Of BufferObject),
+                loadTexture As Boolean, Optional textureDirectory As String = "", Optional loadTextureList As List(Of TextureInfo) = Nothing) As Boolean
+
+            Try
+                Dim xmlDoc As New XmlDocument()
+                xmlDoc.Load(filePath)
+
+                Dim BuffferObjects As XmlNodeList = xmlDoc.GetElementsByTagName("BufferObject")
+                For Each ebo As XmlElement In BuffferObjects
+
+                    Dim name As String = ""
+                    Dim n As XmlNode = ebo.SelectSingleNode("Name")
+                    If n IsNot Nothing Then name = n.InnerText
+                    Dim bXYZ As Boolean = Boolean.Parse(ebo.SelectSingleNode("_bXYZ").InnerText)
+                    Dim bNormal As Boolean = Boolean.Parse(ebo.SelectSingleNode("_bNormal").InnerText)
+                    Dim bTexture As Boolean = Boolean.Parse(ebo.SelectSingleNode("_bTexture").InnerText)
+                    Dim bColor As Boolean = Boolean.Parse(ebo.SelectSingleNode("_bColor").InnerText)
+                    Dim bPointSprite As Boolean = Boolean.Parse(ebo.SelectSingleNode("_bPointSprite").InnerText)
+                    Dim bo As New BufferObject(Nothing, bXYZ, bNormal, bTexture, bColor, bPointSprite, name)
+
+                    bo._primitive = Integer.Parse(ebo.SelectSingleNode("_primitive").InnerText)
+
+                    Dim e As XmlElement = ebo.SelectSingleNode("Material")
+                    If e IsNot Nothing Then
+                        Dim material As New Material()
+                        material.Specular = ToColor4(e.SelectSingleNode("Specular").InnerText)
+                        material.Diffuse = ToColor4(e.SelectSingleNode("Diffuse").InnerText)
+                        material.Ambient = ToColor4(e.SelectSingleNode("Ambient").InnerText)
+                        material.Shininess = Single.Parse(e.SelectSingleNode("Shininess").InnerText)
+                        bo.Material = material
+                    End If
+
+                    bo.Lighting = Boolean.Parse(ebo.SelectSingleNode("Lighting").InnerText)
+                    bo.Culling = Boolean.Parse(ebo.SelectSingleNode("Culling").InnerText)
+                    bo.Blend = Boolean.Parse(ebo.SelectSingleNode("Blend").InnerText)
+                    bo.PointSize = Single.Parse(ebo.SelectSingleNode("PointSize").InnerText)
+                    bo.PointPerspective = Boolean.Parse(ebo.SelectSingleNode("PointPerspective").InnerText)
+                    bo.Active = Boolean.Parse(ebo.SelectSingleNode("Active").InnerText)
+
+                    bo.Martices.Clear()
+                    For Each matrix As XmlNode In ebo.GetElementsByTagName("Martices")
+                        bo.Martices.Add(ToMatrix4(matrix.InnerText))
+                    Next
+
+                    bo._ari = ToIntArray(ebo.SelectSingleNode("_ari").InnerText)
+                    bo._arb = ToByteArray(ebo.SelectSingleNode("_arb").InnerText)
+                    bo._numVertex = Integer.Parse(ebo.SelectSingleNode("_numVertex").InnerText)
+
+                    loadedBufferObject.Add(bo)
+
+                    If loadTexture AndAlso loadTextureList IsNot Nothing Then
+                        Dim ti As New TextureInfo
+                        n = ebo.SelectSingleNode("TextureName")
+                        If n IsNot Nothing Then
+                            ti.name = n.InnerText
+                            bo.TextureName = ti.name
+                        End If
+                        n = ebo.SelectSingleNode("TextureFile")
+                        If n IsNot Nothing Then
+                            Dim path As String = ""
+                            Try
+                                path = textureDirectory
+                                If path.Length > 0 AndAlso path.Last <> "\"c Then path &= "\"
+                                path &= n.InnerText
+                                Dim bmp As Bitmap = Bitmap.FromFile(path)
+                                ti.bmp = bmp
+                                If bo.TextureName = "" Then bo.Texture = ti.bmp
+                                loadTextureList.Add(ti)
+                            Catch ex As Exception
+                                Debug.Print("テクスチャの読み込みに失敗しました " & path)
+                                Debug.Print(ex.Message)
+                            End Try
+                        End If
+                    End If
+
+                Next
+            Catch ex As Exception
+                Debug.Print("BufferObjectの読み込みに失敗しました")
+                Debug.Print(ex.Message)
+                Return False
+            End Try
+
+            Return True
+        End Function
+
+
+        ''' <summary>
+        ''' 使用するテクスチャをビットマップで指定または取得します
+        ''' 実際に使用するには、ビットマップはこのプロパティと、View3D.AddTexture()の両方で設定されていないといけません
         ''' </summary>
         ''' <returns></returns>
         Public Property Texture As Bitmap
@@ -1056,17 +1840,45 @@ Public Class View3D
             End Get
             Set(value As Bitmap)
                 _bmp = value
+                If value IsNot Nothing Then _textureName = "" '名前指定を無効にする
             End Set
         End Property
 
-        Friend Sub New(ByRef parent As View3D, bXYZ As Boolean, bNormal As Boolean, bTexture As Boolean, bColor As Boolean, bPointSprite As Boolean)
+        ''' <summary>
+        ''' 使用するテクスチャを名前で指定または取得します
+        ''' 実際に使用するには、ビットマップはこのプロパティと、View3D.AddTexture()の両方で設定されていないといけません
+        ''' </summary>
+        ''' <returns></returns>
+        Public Property TextureName As String
+            Get
+                Return _textureName
+            End Get
+            Set(value As String)
+                _textureName = value
+                If value <> "" Then _bmp = Nothing 'ビットマップによる指定を無効にする
+            End Set
+        End Property
+
+        Public ReadOnly Property GetName As String
+            Get
+                Return name
+            End Get
+        End Property
+
+        Friend Sub New(ByRef parent As View3D, bXYZ As Boolean, bNormal As Boolean, bTexture As Boolean, bColor As Boolean,
+                       bPointSprite As Boolean, Optional name As String = "")
+
+            If name.IndexOfAny(IO.Path.GetInvalidFileNameChars()) >= 0 Then Throw New Exception("name has invalid character")
+
             _parent = parent
             _bXYZ = bXYZ
             _bNormal = bNormal
             _bTexture = bTexture
             _bColor = bColor
             _bPointSprite = bPointSprite
+            Me.name = name
             Martices.Add(Matrix4.Identity)
+            _primitive = BeginMode.Points
         End Sub
 
         '頂点の大きさ(バイトサイズ)を返す
@@ -1300,6 +2112,97 @@ Public Class View3D
             _ari.Add(_numVertex + 1)
             _ari.Add(_numVertex + 2)
             _numVertex += 3
+            Return True
+        End Function
+
+        ''' <summary>
+        ''' 四角形とテクスチャ座標を追加します
+        ''' １つの四角形は２つの三角形で表されます
+        ''' 三角形以外のプリミティブが設定されていた場合はFalseを返します
+        ''' c1,c2,c3,c4: p1～p4に対応する頂点カラー（頂点バッファが頂点カラーを持っていない場合は設定されません）
+        ''' div: 四角形を分割して作成します。例えば、div=2の場合、4毎の四角形⇒8毎の三角形が作成されます。デフォルトは1で分割されません
+        ''' 頂点バッファが法線ベクトルを持っている場合は、各頂点からの計算値が代入されます。
+        ''' 四角形は時計回りの頂点の並びが「表面」として処理されます
+        ''' </summary>
+        ''' <param name="p1"></param>
+        ''' <param name="c1"></param>
+        ''' <param name="p2"></param>
+        ''' <param name="c2"></param>
+        ''' <param name="p3"></param>
+        ''' <param name="c3"></param>
+        ''' <param name="p4"></param>
+        ''' <param name="c4"></param>
+        ''' <param name="div"></param>
+        ''' <returns></returns>
+        Public Function AddQuad(p1 As Vector3, c1 As Color4, p2 As Vector3, c2 As Color4, p3 As Vector3, c3 As Color4,
+                                p4 As Vector3, c4 As Color4, Optional div As Integer = 1) As Boolean
+            If _numVertex = 0 Then
+                _primitive = BeginMode.Triangles
+                Lighting = False
+            ElseIf _primitive <> BeginMode.Triangles Then
+                Debug.Print("ポイント、ライン、トライアングルなどのプリミティブを１つのBufferObjectに混在させることはできません")
+                Return False
+            End If
+
+            '必要に応じて法線を計算
+            Dim vn As Vector3
+            If _bNormal Then
+                vn = Vector3.Cross(p3 - p1, p2 - p3)
+                vn.Normalize()
+            End If
+
+            If div < 1 Then div = 1
+            For j As Integer = 0 To div
+                Dim vL As New Vector3(
+                    (p4.X - p1.X) * j / div + p1.X,
+                    (p4.Y - p1.Y) * j / div + p1.Y,
+                    (p4.Z - p1.Z) * j / div + p1.Z)
+                Dim vR As New Vector3(
+                    (p3.X - p2.X) * j / div + p2.X,
+                    (p3.Y - p2.Y) * j / div + p2.Y,
+                    (p3.Z - p2.Z) * j / div + p2.Z)
+                Dim cL As New Color4(
+                    (c4.R - c1.R) * j / div + c1.R,
+                    (c4.G - c1.G) * j / div + c1.G,
+                    (c4.B - c1.B) * j / div + c1.B,
+                    (c4.A - c1.A) * j / div + c1.A)
+                Dim cR As New Color4(
+                    (c3.R - c2.R) * j / div + c2.R,
+                    (c3.G - c2.G) * j / div + c2.G,
+                    (c3.B - c2.B) * j / div + c2.B,
+                    (c3.A - c2.A) * j / div + c2.A)
+                For i As Integer = 0 To div
+                    Dim p As New Vector3(
+                        (vR.X - vL.X) * i / div + vL.X,
+                        (vR.Y - vL.Y) * i / div + vL.Y,
+                        (vR.Z - vL.Z) * i / div + vL.Z)
+                    Dim c As New Color4(
+                        (cR.R - cL.R) * i / div + cL.R,
+                        (cR.G - cL.G) * i / div + cL.G,
+                        (cR.B - cL.B) * i / div + cL.B,
+                        (cR.A - cL.A) * i / div + cL.A)
+
+                    '頂点バッファに追加
+                    arb_Add(p)
+                    If _bNormal Then arb_Add(vn)
+                    If _bTexture Then arb_Add(New Vector2(0, 0))
+                    If _bColor Then arb_Add(c)
+                Next
+            Next
+
+            For j As Integer = 0 To div - 1
+                For i As Integer = 0 To div - 1
+
+                    'インデックスを追加
+                    _ari.Add(_numVertex + j * (div + 1) + i)            '左上
+                    _ari.Add(_numVertex + j * (div + 1) + i + 1)        '右上
+                    _ari.Add(_numVertex + (j + 1) * (div + 1) + i + 1)  '右下
+                    _ari.Add(_numVertex + j * (div + 1) + i)            '左上
+                    _ari.Add(_numVertex + (j + 1) * (div + 1) + i + 1)  '右下
+                    _ari.Add(_numVertex + (j + 1) * (div + 1) + i)      '左下
+                Next
+            Next
+            _numVertex += (div + 1) * (div + 1)
             Return True
         End Function
 
